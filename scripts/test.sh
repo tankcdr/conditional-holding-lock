@@ -12,8 +12,12 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
 fi
 export PATH="${JAVA_HOME:+$JAVA_HOME/bin:}$PATH"
 
+# shellcheck source=lib/splice-dir.sh
+. "$ROOT/scripts/lib/splice-dir.sh"
+require_splice
+
 echo "==> Daml Script confirmation tests (Java $(java -version 2>&1 | head -1))"
-( cd "$ROOT/splice/token-standard/examples/splice-test-token-conditional-lock-test" && dpm test )
+( cd "$SPLICE_DIR/token-standard/examples/splice-test-token-conditional-lock-test" && dpm test )
 
 if command -v forge >/dev/null 2>&1; then
   echo "==> EVM hash vectors"

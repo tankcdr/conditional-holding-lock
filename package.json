@@ -2,7 +2,7 @@
   "name": "conditional-holding-lock",
   "private": true,
   "scripts": {
-    "setup": "./scripts/init-submodules.sh",
+    "setup": "./scripts/init-submodules.sh && ./scripts/clone-splice.sh",
     "build:dars": "./scripts/build-dars.sh",
     "test": "./scripts/test.sh",
     "localnet": "./scripts/localnet.sh",

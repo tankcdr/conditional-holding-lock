@@ -9,6 +9,9 @@ contracts/evm/cache/
 contracts/evm/broadcast/
 contracts/evm/lib/
 
+# Splice source lives on tankcdr/splice, not in this repo.
+/splice/
+
 # Localnet
 .env
 .env.*

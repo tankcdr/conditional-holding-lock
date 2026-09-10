@@ -5,7 +5,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TS="$ROOT/splice/token-standard"
+# shellcheck source=lib/splice-dir.sh
+. "$ROOT/scripts/lib/splice-dir.sh"
+require_splice
+TS="$SPLICE_DIR/token-standard"
 export PATH="${HOME}/.dpm/bin:${PATH}"
 
 packages=(

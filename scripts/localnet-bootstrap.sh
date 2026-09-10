@@ -27,7 +27,10 @@ upload() {
   esac
 }
 
-TS="$ROOT/splice/token-standard"
+# shellcheck source=lib/splice-dir.sh
+. "$ROOT/scripts/lib/splice-dir.sh"
+require_splice
+TS="$SPLICE_DIR/token-standard"
 upload "$TS/splice-api-token-conditional-lock-v1/.daml/dist/splice-api-token-conditional-lock-v1-1.0.0.dar"
 upload "$TS/splice-token-standard-utils/.daml/dist/splice-token-standard-utils-2.0.0.dar"
 upload "$TS/examples/splice-test-token-v2/.daml/dist/splice-test-token-v2-1.0.1.dar"
