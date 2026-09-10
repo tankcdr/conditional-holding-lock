@@ -3,11 +3,6 @@
 target/
 *.log
 
-# Nested Splice working clone: only token-standard is tracked
-splice/.git
-splice/*
-!splice/token-standard/
-
 # Foundry
 contracts/evm/out/
 contracts/evm/cache/

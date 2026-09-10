@@ -1,8 +1,10 @@
-repo: https://github.com/canton-network/splice
-ref: main
-commit: db391b75dd61720460beff6401ca768320e37370
+upstream: https://github.com/canton-network/splice
+fork: https://github.com/tankcdr/splice
+submodule: splice
+branch: cip-conditional-holding-lock
+upstream-commit: db391b75dd61720460beff6401ca768320e37370
+cip-commit: 5523a43ab90db7f5944cf8e65f680c8b2c4d527d
 sdk: 3.5.2
 lf: 2.1
 sparse-checkout:
   - token-standard
-branch: cip-conditional-holding-lock

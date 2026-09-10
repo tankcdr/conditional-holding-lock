@@ -1,0 +1,4 @@
+[submodule "splice"]
+	path = splice
+	url = https://github.com/tankcdr/splice.git
+	branch = cip-conditional-holding-lock
