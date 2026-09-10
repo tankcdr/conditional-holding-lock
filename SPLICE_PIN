@@ -1,9 +1,9 @@
-# Pointer only. Splice source is not in this repository.
-upstream: https://github.com/canton-network/splice
-fork: https://github.com/tankcdr/splice
-branch: cip-conditional-holding-lock
-upstream-commit: db391b75dd61720460beff6401ca768320e37370
-cip-commit: 5523a43ab90db7f5944cf8e65f680c8b2c4d527d
+# Interface DARs come from this tree; we do not vendor Splice source.
+dars-url: https://raw.githubusercontent.com/canton-network/splice/main/daml/dars
+ref: main
+packages:
+  - splice-api-token-metadata-v1-1.0.0.dar
+  - splice-api-token-holding-v2-1.0.0.dar
 sdk: 3.5.2
 lf: 2.1
-clone: ./scripts/clone-splice.sh
+fetch: ./scripts/fetch-dars.sh

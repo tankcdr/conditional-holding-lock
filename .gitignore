@@ -9,8 +9,10 @@ contracts/evm/cache/
 contracts/evm/broadcast/
 contracts/evm/lib/
 
-# Splice source lives on tankcdr/splice, not in this repo.
+# Splice source is not in this repo.
 /splice/
+# Downloaded Splice interface DARs (compile-time deps).
+/.dars/
 
 # Localnet
 .env

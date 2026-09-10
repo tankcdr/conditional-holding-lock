@@ -1,54 +1,18 @@
 #!/usr/bin/env bash
-# Build token-standard packages in dependency order and symlink *-current.dar
-# names that Splice daml.yaml files expect. Outside Splice's sbt/Nix, this is
-# how local DAR data-dependencies resolve.
+# Fetch Splice interface DARs, then build first-party packages against them.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=lib/splice-dir.sh
-. "$ROOT/scripts/lib/splice-dir.sh"
-require_splice
-TS="$SPLICE_DIR/token-standard"
 export PATH="${HOME}/.dpm/bin:${PATH}"
 
-packages=(
-  splice-api-token-metadata-v1
-  splice-api-token-holding-v1
-  splice-api-token-holding-v2
-  splice-api-token-transfer-instruction-v1
-  splice-api-token-transfer-instruction-v2
-  splice-api-token-allocation-v1
-  splice-api-token-allocation-v2
-  splice-api-token-allocation-instruction-v1
-  splice-api-token-allocation-instruction-v2
-  splice-api-token-allocation-request-v1
-  splice-api-token-allocation-request-v2
-  splice-api-token-transfer-events-v2
-  splice-api-token-conditional-lock-v1
-  splice-token-standard-utils
-  examples/splice-test-token-v2
-  examples/splice-test-token-conditional-lock-test
-)
+"$ROOT/scripts/fetch-dars.sh"
 
-symlink_current() {
-  local dir="$1"
-  local name
-  name="$(awk '/^name:/{print $2; exit}' "$dir/daml.yaml")"
-  local dist="$dir/.daml/dist"
-  local dar
-  dar="$(find "$dist" -maxdepth 1 -name "${name}-*.dar" ! -name '*-current.dar' | head -n 1)"
-  if [[ -z "${dar}" ]]; then
-    echo "error: no versioned DAR for $name in $dist" >&2
-    return 1
-  fi
-  ln -sfn "$(basename "$dar")" "$dist/${name}-current.dar"
-  echo "    -> $(basename "$dar")  =>  ${name}-current.dar"
-}
+packages=(
+  packages/splice-api-token-conditional-lock-v1
+  packages/conditional-lock-test
+)
 
 for pkg in "${packages[@]}"; do
   echo "==> dpm build $pkg"
-  ( cd "$TS/$pkg" && dpm build )
-  symlink_current "$TS/$pkg"
+  ( cd "$ROOT/$pkg" && dpm build )
 done
-
-echo "OK: all packages built"
+echo "OK: first-party packages built"

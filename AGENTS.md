@@ -1,10 +1,8 @@
 # Conditional Holding Lock
 
-Daml 3.5.2, LF 2.1. Canton-swap localnet layout. **Do not commit Splice source.**
+Daml 3.5.2, LF 2.1. Canton-swap localnet layout. **Do not commit Splice source or downloaded DARs.**
 
-- `localnet/` submodule is `digital-asset/cn-quickstart`.
-- `localnet-overrides/` holds splice confs the quickstart pin does not ship.
-- CIP Daml is https://github.com/tankcdr/splice/tree/cip-conditional-holding-lock
-  Clone with `./scripts/clone-splice.sh` into gitignored `./splice`, or set `SPLICE_DIR`.
-- Build DARs with `./scripts/build-dars.sh`. Test with `./scripts/test.sh` (Java 17+).
-- Hash preimages are 64-char lowercase hex of 32 raw bytes via `DA.Crypto.Text`.
+- Compile against published DARs: `./scripts/fetch-dars.sh` → gitignored `.dars/`.
+- First-party Daml is `packages/`. Do not clone canton-network/splice into this repo.
+- `localnet/` submodule is cn-quickstart. `localnet-overrides/` is unpublished splice conf.
+- CIP PR (if any) is a branch on a Splice fork, not files here.

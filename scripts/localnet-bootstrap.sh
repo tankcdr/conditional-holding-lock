@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Build unpublished CIP DARs and upload them onto a running localnet participant.
-# Mirrors canton-swap scripts/localnet-bootstrap.sh (HTTP /v2/packages), without
-# the swap-product DAR catalog.
+# Build first-party CIP DARs and upload them onto a running localnet participant.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -27,12 +25,6 @@ upload() {
   esac
 }
 
-# shellcheck source=lib/splice-dir.sh
-. "$ROOT/scripts/lib/splice-dir.sh"
-require_splice
-TS="$SPLICE_DIR/token-standard"
-upload "$TS/splice-api-token-conditional-lock-v1/.daml/dist/splice-api-token-conditional-lock-v1-1.0.0.dar"
-upload "$TS/splice-token-standard-utils/.daml/dist/splice-token-standard-utils-2.0.0.dar"
-upload "$TS/examples/splice-test-token-v2/.daml/dist/splice-test-token-v2-1.0.1.dar"
+upload "$ROOT/packages/splice-api-token-conditional-lock-v1/.daml/dist/splice-api-token-conditional-lock-v1-1.0.0.dar"
 
 info "bootstrap complete"
