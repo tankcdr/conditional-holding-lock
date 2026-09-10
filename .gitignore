@@ -3,11 +3,10 @@
 target/
 *.log
 
-# Nested Splice working clone metadata (the token-standard tree is tracked)
+# Nested Splice working clone: only token-standard is tracked
 splice/.git
-splice/.github
-splice/apps
-splice/docs
+splice/*
+!splice/token-standard/
 
 # Foundry
 contracts/evm/out/
