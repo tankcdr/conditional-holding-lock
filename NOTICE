@@ -1,0 +1,9 @@
+Conditional Holding Lock
+Copyright 2026 Long Run Advisory
+
+This product includes software developed by Digital Asset (Switzerland) GmbH
+and/or its affiliates, vendored from canton-network/splice (Apache-2.0).
+Files under splice/token-standard that carry a Digital Asset copyright notice
+remain under that notice. New files for splice-api-token-conditional-lock-v1
+and the TestTokenV2 conditional-lock implementation are Copyright 2026 Long
+Run Advisory, Apache-2.0.

@@ -1,0 +1,28 @@
+.DS_Store
+.daml/
+target/
+*.log
+
+# Nested Splice working clone metadata (the token-standard tree is tracked)
+splice/.git
+splice/.github
+splice/apps
+splice/docs
+
+# Foundry
+contracts/evm/out/
+contracts/evm/cache/
+contracts/evm/broadcast/
+contracts/evm/lib/
+
+# Localnet
+.env
+.env.*
+!.env.example
+localnet/
+.localnet/
+
+# IDE
+.idea/
+.vscode/
+*.iml

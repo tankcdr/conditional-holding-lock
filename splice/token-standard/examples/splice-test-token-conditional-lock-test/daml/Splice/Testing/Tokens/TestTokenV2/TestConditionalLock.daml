@@ -1,0 +1,300 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Splice.Testing.Tokens.TestTokenV2.TestConditionalLock where
+
+import DA.Assert
+import DA.Foldable (foldMap)
+import DA.Time
+import DA.TextMap qualified as TextMap
+
+import Daml.Script
+
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 as TestTokenV2
+import Splice.TokenStandard.Utils qualified as TSU
+
+
+emptyExtraArgs : ExtraArgs
+emptyExtraArgs = ExtraArgs with
+  context = emptyChoiceContext
+  meta = emptyMetadata
+
+-- Shared 32-byte preimages. Digests are EVM sha256(bytes32) / keccak256(bytes32).
+preimageZero : Text
+preimageZero = "0000000000000000000000000000000000000000000000000000000000000000"
+
+sha256Zero : Text
+sha256Zero = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+
+keccak256Zero : Text
+keccak256Zero = "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
+
+preimage01 : Text
+preimage01 = "0101010101010101010101010101010101010101010101010101010101010101"
+
+sha256_01 : Text
+sha256_01 = "72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793"
+
+keccak256_01 : Text
+keccak256_01 = "cebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc"
+
+preimageFf : Text
+preimageFf = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+sha256Ff : Text
+sha256Ff = "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051"
+
+keccak256Ff : Text
+keccak256Ff = "a9c584056064687e149968cbab758a3376d22aedc6a55823d1b3ecbee81b8fb9"
+
+preimageDeadBeef : Text
+preimageDeadBeef = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+sha256DeadBeef : Text
+sha256DeadBeef = "8200cf0ce11447bf6353cbac964d07d1c390d61d07e6c5d0214450b3add6449b"
+
+keccak256DeadBeef : Text
+keccak256DeadBeef = "86c47f76ff4a6cb8ee9c172982eda47e895262b5a6a7582aaf7d97295ce1d8d4"
+
+data Parties = Parties with
+    admin : Party
+    alice : Party
+    bob : Party
+
+data Registry = Registry with
+    parties : Parties
+    rulesCid : ContractId TestTokenV2.TokenRules
+    factoryCid : ContractId CL.ConditionalLockFactory
+    instrId : V2.InstrumentId
+
+allocateParties : Script Parties
+allocateParties = do
+  admin <- allocateParty "admin"
+  alice <- allocateParty "alice"
+  bob <- allocateParty "bob"
+  pure Parties with admin, alice, bob
+
+createRegistry : Parties -> Text -> Script Registry
+createRegistry parties instrumentName = do
+  rulesCid <- submit parties.admin $ createCmd TestTokenV2.TokenRules with
+    admin = parties.admin
+  let instrId = V2.InstrumentId with
+        admin = parties.admin
+        id = instrumentName
+  pure Registry with
+    parties
+    rulesCid
+    factoryCid = toInterfaceContractId rulesCid
+    instrId
+
+mint : Registry -> Party -> Decimal -> Script (ContractId V2.Holding)
+mint registry owner amount = do
+  cid <- submit (actAs registry.parties.admin <> actAs owner) $ createCmd TestTokenV2.Token with
+    holding = V2.HoldingView with
+      account = TSU.basicAccount owner
+      instrumentId = registry.instrId
+      amount
+      lock = None
+      meta = emptyMetadata
+  pure (toInterfaceContractId cid)
+
+htlcTerms : Registry -> Party -> Party -> Time -> Time -> Text -> CL.HashAlgorithm -> CL.LockTerms
+htlcTerms registry owner receiver requestedAt expiresAt digest algorithm =
+  CL.LockTerms with
+    owner = TSU.basicAccount owner
+    instrumentId = registry.instrId
+    amount = 10.0
+    rules =
+      [ CL.Rule with
+          id = "claim"
+          enactors = [receiver]
+          guard = CL.Guard_Preimage with algorithm, digest
+          outcome = CL.Outcome_Transfer with
+            legs = [CL.Leg with receiver = TSU.basicAccount receiver, amount = 10.0]
+      ]
+    expiresAt
+    fallback = CL.Outcome_Unlock
+    requestedAt
+    meta = Metadata $ TextMap.fromList [(TSU.lockContextKey, "hashlock")]
+
+dvpTerms : Registry -> Party -> Party -> Time -> Time -> CL.LockTerms
+dvpTerms registry owner receiver requestedAt expiresAt =
+  CL.LockTerms with
+    owner = TSU.basicAccount owner
+    instrumentId = registry.instrId
+    amount = 10.0
+    rules =
+      [ CL.Rule with
+          id = "settle"
+          enactors = [owner, receiver]
+          guard = CL.Guard_Parties with
+            parties = [owner, receiver]
+            threshold = 2
+          outcome = CL.Outcome_Transfer with
+            legs = [CL.Leg with receiver = TSU.basicAccount receiver, amount = 10.0]
+      ]
+    expiresAt
+    fallback = CL.Outcome_Unlock
+    requestedAt
+    meta = Metadata $ TextMap.fromList [(TSU.lockContextKey, "dvp")]
+
+expectLocked : CL.ConditionalLockResult -> Script (ContractId CL.ConditionalLock, ContractId V2.Holding)
+expectLocked result = case result.output of
+  CL.ConditionalLockResult_Locked lockCid holdingCid _ -> pure (lockCid, holdingCid)
+  other -> fail $ "expected Locked, got " <> show other
+
+expectEnacted : CL.ConditionalLockResult -> Script [ContractId V2.Holding]
+expectEnacted result = case result.output of
+  CL.ConditionalLockResult_Enacted receiverHoldingCids _ None -> pure receiverHoldingCids
+  other -> fail $ "expected Enacted without continuation, got " <> show other
+
+lockOneStep
+  : Registry -> Party -> [Party] -> [ContractId V2.Holding] -> CL.LockTerms
+  -> Script (ContractId CL.ConditionalLock, ContractId V2.Holding)
+lockOneStep registry submitter actors inputs terms = do
+  -- TokenRules is signed only by admin, so the factory is not visible to
+  -- alice/bob unless admin is among the submitting parties.
+  result <- submit (foldMap actAs actors <> actAs submitter <> actAs registry.parties.admin) $
+    exerciseCmd registry.factoryCid CL.ConditionalLockFactory_Lock with
+      terms
+      inputHoldingCids = inputs
+      actors
+      extraArgs = emptyExtraArgs
+  expectLocked result
+
+-- Confirmation 1: DA.Crypto.Text matches EVM sha256(bytes32) and keccak256(bytes32).
+test_hashVectorsMatchEvm : Script ()
+test_hashVectorsMatchEvm = do
+  TSU.hashPreimage CL.Sha256 preimageZero === sha256Zero
+  TSU.hashPreimage CL.Keccak256 preimageZero === keccak256Zero
+  TSU.hashPreimage CL.Sha256 preimage01 === sha256_01
+  TSU.hashPreimage CL.Keccak256 preimage01 === keccak256_01
+  TSU.hashPreimage CL.Sha256 preimageFf === sha256Ff
+  TSU.hashPreimage CL.Keccak256 preimageFf === keccak256Ff
+  TSU.hashPreimage CL.Sha256 preimageDeadBeef === sha256DeadBeef
+  TSU.hashPreimage CL.Keccak256 preimageDeadBeef === keccak256DeadBeef
+  assertMsg "sha256 of hex text is not the EVM digest" (sha256Zero /= TSU.hashPreimage CL.Sha256 (TSU.hashPreimage CL.Sha256 preimageZero))
+  pure ()
+
+-- Confirmation 3: one-step lock when both parties are actors.
+test_oneStepLockWhenBothPartiesAct : Script ()
+test_oneStepLockWhenBothPartiesAct = do
+  parties <- allocateParties
+  registry <- createRegistry parties "X"
+  holding <- mint registry parties.alice 100.0
+  now <- getTime
+  (lockCid, _) <- lockOneStep registry parties.alice [parties.alice, parties.bob] [holding] $
+    htlcTerms registry parties.alice parties.bob now (now `addRelTime` days 1) sha256Zero CL.Sha256
+  Some lock <- queryContractId @TestTokenV2.TokenConditionalLock parties.bob (coerceContractId lockCid)
+  assertMsg "bob is a signatory (authority captured at lock time)"
+    (parties.bob `elem` signatory lock)
+  assertMsg "alice is a signatory"
+    (parties.alice `elem` signatory lock)
+  pure ()
+
+-- Confirmation 2: receiver authority captured at accept/lock time; Enact needs no owner signature.
+test_enactWithoutOwnerSignature : Script ()
+test_enactWithoutOwnerSignature = do
+  parties <- allocateParties
+  registry <- createRegistry parties "X"
+  holding <- mint registry parties.alice 100.0
+  now <- getTime
+  (lockCid, _) <- lockOneStep registry parties.alice [parties.alice, parties.bob] [holding] $
+    htlcTerms registry parties.alice parties.bob now (now `addRelTime` days 1) sha256Zero CL.Sha256
+  -- Registry admin is readAs so EventLog (TokenRules) is visible; alice is not a submitter.
+  result <- submit (actAs parties.bob <> readAs parties.admin) $
+    exerciseCmd lockCid CL.ConditionalLock_Enact with
+      ruleId = "claim"
+      actors = [parties.bob]
+      witness = CL.Witness with preimages = [preimageZero]
+      legs = None
+      extraArgs = emptyExtraArgs
+  receiverHoldings <- expectEnacted result
+  assertMsg "bob received the claimed holding" (not (null receiverHoldings))
+  -- Owner-only submit must not be able to enact Bob's claim rule.
+  holding2 <- mint registry parties.alice 10.0
+  now2 <- getTime
+  (lockCid2, _) <- lockOneStep registry parties.alice [parties.alice, parties.bob] [holding2] $
+    htlcTerms registry parties.alice parties.bob now2 (now2 `addRelTime` days 1) keccak256Zero CL.Keccak256
+  submitMustFail (actAs parties.alice <> readAs parties.admin) $
+    exerciseCmd lockCid2 CL.ConditionalLock_Enact with
+      ruleId = "claim"
+      actors = [parties.alice]
+      witness = CL.Witness with preimages = [preimageZero]
+      legs = None
+      extraArgs = emptyExtraArgs
+  resultK <- submit (actAs parties.bob <> readAs parties.admin) $
+    exerciseCmd lockCid2 CL.ConditionalLock_Enact with
+      ruleId = "claim"
+      actors = [parties.bob]
+      witness = CL.Witness with preimages = [preimageZero]
+      legs = None
+      extraArgs = emptyExtraArgs
+  _ <- expectEnacted resultK
+  pure ()
+
+-- Confirmation 4: two Enact choices on two TestTokenV2 instruments commit atomically.
+test_atomicDualEnactDvP : Script ()
+test_atomicDualEnactDvP = do
+  parties <- allocateParties
+  -- Two instruments, two registry admins, same alice/bob.
+  adminX <- allocateParty "adminX"
+  adminY <- allocateParty "adminY"
+  let partiesX = Parties with admin = adminX, alice = parties.alice, bob = parties.bob
+  let partiesY = Parties with admin = adminY, alice = parties.alice, bob = parties.bob
+  regX <- createRegistry partiesX "X"
+  regY <- createRegistry partiesY "Y"
+  holdingX <- mint regX parties.alice 10.0
+  holdingY <- mint regY parties.bob 10.0
+  now <- getTime
+  let expiresAt = now `addRelTime` days 1
+  (lockX, _) <- lockOneStep regX parties.alice [parties.alice, parties.bob] [holdingX] $
+    dvpTerms regX parties.alice parties.bob now expiresAt
+  (lockY, _) <- lockOneStep regY parties.bob [parties.bob, parties.alice] [holdingY] $
+    dvpTerms regY parties.bob parties.alice now expiresAt
+  let enactX = exerciseCmd lockX CL.ConditionalLock_Enact with
+        ruleId = "settle"
+        actors = [parties.alice, parties.bob]
+        witness = TSU.emptyWitness
+        legs = None
+        extraArgs = emptyExtraArgs
+  let enactY = exerciseCmd lockY CL.ConditionalLock_Enact with
+        ruleId = "settle"
+        actors = [parties.alice, parties.bob]
+        witness = TSU.emptyWitness
+        legs = None
+        extraArgs = emptyExtraArgs
+  results <- submit
+      (actAs parties.alice <> actAs parties.bob <> readAs adminX <> readAs adminY) $
+    (\rx ry -> (rx, ry)) <$> enactX <*> enactY
+  _ <- expectEnacted results._1
+  _ <- expectEnacted results._2
+  -- Atomicity: one missing actor fails the whole transaction, leaving both locks.
+  holdingX2 <- mint regX parties.alice 10.0
+  holdingY2 <- mint regY parties.bob 10.0
+  now2 <- getTime
+  let expiresAt2 = now2 `addRelTime` days 1
+  (lockX2, _) <- lockOneStep regX parties.alice [parties.alice, parties.bob] [holdingX2] $
+    dvpTerms regX parties.alice parties.bob now2 expiresAt2
+  (lockY2, _) <- lockOneStep regY parties.bob [parties.bob, parties.alice] [holdingY2] $
+    dvpTerms regY parties.bob parties.alice now2 expiresAt2
+  submitMustFail (actAs parties.alice <> readAs adminX <> readAs adminY) $
+    (\_ _ -> ())
+      <$> exerciseCmd lockX2 CL.ConditionalLock_Enact with
+            ruleId = "settle"
+            actors = [parties.alice, parties.bob]
+            witness = TSU.emptyWitness
+            legs = None
+            extraArgs = emptyExtraArgs
+      <*> exerciseCmd lockY2 CL.ConditionalLock_Enact with
+            ruleId = "settle"
+            actors = [parties.alice, parties.bob]
+            witness = TSU.emptyWitness
+            legs = None
+            extraArgs = emptyExtraArgs
+  Some _ <- queryContractId @TestTokenV2.TokenConditionalLock parties.alice (coerceContractId lockX2)
+  Some _ <- queryContractId @TestTokenV2.TokenConditionalLock parties.bob (coerceContractId lockY2)
+  pure ()

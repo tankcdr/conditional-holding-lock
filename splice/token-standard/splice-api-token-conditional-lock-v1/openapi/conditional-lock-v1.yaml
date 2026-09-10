@@ -1,0 +1,87 @@
+# Copyright (c) 2026 Long Run Advisory. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+openapi: 3.0.0
+info:
+  title: Conditional lock off-ledger API
+  description: |
+    Implemented by token registries that advertise
+    splice-api-token-conditional-lock-v1. Same request and response shape as
+    the CIP-0056 transfer-factory endpoint.
+  version: 1.0.0
+paths:
+  /registry/conditional-lock/v1/lock-factory:
+    post:
+      operationId: getConditionalLockFactory
+      description: Factory contract id, choice context, and disclosed contracts for ConditionalLockFactory_Lock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GetFactoryRequest"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FactoryWithChoiceContext"
+        "400":
+          $ref: "#/components/responses/400"
+        "404":
+          $ref: "#/components/responses/404"
+
+  /registry/conditional-lock/v1/{contractId}/choice-contexts/{choice}:
+    post:
+      operationId: getConditionalLockChoiceContext
+      description: Choice context and disclosed contracts for accept, reject, withdraw, enact, expire, cancel, or amend.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: choice
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [accept, reject, withdraw, enact, expire, cancel, amend]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GetChoiceContextRequest"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoiceContext"
+        "400":
+          $ref: "#/components/responses/400"
+        "404":
+          $ref: "#/components/responses/404"
+
+components:
+  schemas:
+    GetFactoryRequest:
+      type: object
+      additionalProperties: true
+    GetChoiceContextRequest:
+      type: object
+      additionalProperties: true
+    FactoryWithChoiceContext:
+      type: object
+      additionalProperties: true
+    ChoiceContext:
+      type: object
+      additionalProperties: true
+  responses:
+    "400":
+      description: bad request
+    "404":
+      description: not found
