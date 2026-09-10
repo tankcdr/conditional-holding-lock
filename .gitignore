@@ -13,7 +13,8 @@ contracts/evm/lib/
 .env
 .env.*
 !.env.example
-localnet/
+!.env.localnet.example
+.env.localnet.generated
 .localnet/
 
 # IDE

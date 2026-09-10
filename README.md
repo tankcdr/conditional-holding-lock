@@ -1,43 +1,34 @@
 # Conditional Holding Lock
 
-Apache-2.0 reference implementation of **CIP-cmadison-Conditional-Holding-Lock** for the Canton Network Token Standard.
-
-This repository is a Daml development environment against **Splice main** (SDK **3.5.2**, Daml-LF **2.1**). Splice is a **git submodule** of a fork (`tankcdr/splice`, branch `cip-conditional-holding-lock`) so the Daml work is a PR-shaped diff against upstream. Unpublished packages are built locally and can be uploaded onto a stock Splice localnet before they exist in the published `splice-app` image — the same overlay idea Canton Swap uses for splice confs the quickstart pin has not rolled out.
+Apache-2.0 Daml development environment for **CIP-cmadison-Conditional-Holding-Lock**, shaped like [canton-swap-monorepo](https://github.com/interstice) localnet: a `cn-quickstart` submodule, compose overlay, and unpublished confs/DARs mounted or uploaded on top of stock Splice.
 
 The CIP itself is CC0-1.0; code here is Apache-2.0.
 
-## Confirmed before posting
+## What this repo is
+
+Canton Swap’s `localnet/` submodule is `digital-asset/cn-quickstart`. Unpublished Splice confs live in `localnet-overrides/` and are bind-mounted into the splice container because the quickstart pin is older than the splice-app image. First-party DARs are built on the host and uploaded onto the running participant.
+
+This repo does the same thing, without the swap product (no orchestrator, Keycloak, Supabase, or Solana):
+
+| Path | Role |
+| --- | --- |
+| `localnet/` | git submodule → `digital-asset/cn-quickstart` (how you **run** Canton) |
+| `localnet-overrides/splice-0.6.7/` | splice confs the quickstart pin does not ship |
+| `docker-compose.localnet.yml` | canton + splice-app + postgres + wallet/scan UIs |
+| `scripts/localnet.sh` | up, wait, upload CIP DARs |
+| `splice/` | git submodule → `tankcdr/splice` `@ cip-conditional-holding-lock` (how you **PR** the CIP) |
+| `contracts/evm/` | shared hash vectors |
+
+## Confirmed on SDK 3.5.2
 
 | Check | Result |
 | --- | --- |
-| `DA.Crypto.Text.sha256` / `keccak256` match EVM `sha256(bytes32)` / `keccak256(bytes32)` on shared vectors | **PASS** (`test_hashVectorsMatchEvm` + `forge test`) |
-| Receiver authority captured at lock/accept time; `Enact` needs no owner signature | **PASS** (`test_enactWithoutOwnerSignature`) |
-| One-step lock when both parties are actors | **PASS** (`test_oneStepLockWhenBothPartiesAct`) |
-| Two `Enact` choices on two TestTokenV2 instruments commit atomically | **PASS** (`test_atomicDualEnactDvP`) |
-
-Shared vectors: [`fixtures/hash-vectors.json`](fixtures/hash-vectors.json).
-
-## Layout
-
-```
-splice/                         # git submodule → tankcdr/splice @ cip-conditional-holding-lock
-  token-standard/
-    splice-api-token-conditional-lock-v1/
-    splice-token-standard-utils/  # ConditionalLocks.daml (conformance evaluator)
-    examples/splice-test-token-v2/
-    examples/splice-test-token-conditional-lock-test/
-contracts/evm/                    # HashVectors.sol — EVM side of the shared vectors
-docs/cip/                         # CIP draft (CC0-1.0)
-localnet-overrides/               # how to overlay unpublished DARs onto localnet
-scripts/build-dars.sh             # daml build in dep order, symlink *-current.dar
-scripts/init-submodules.sh        # blobless sparse checkout of token-standard
-```
-
-Splice submodule: [`tankcdr/splice`](https://github.com/tankcdr/splice) branch `cip-conditional-holding-lock`, forked from `canton-network/splice` at `db391b75`.
+| `DA.Crypto.Text.sha256` / `keccak256` match EVM `sha256(bytes32)` / `keccak256(bytes32)` | PASS |
+| Receiver authority captured at lock time; `Enact` needs no owner signature | PASS |
+| One-step lock when both parties are actors | PASS |
+| Two `Enact`s on two TestTokenV2 instruments commit atomically | PASS |
 
 ## Clone
-
-Splice is large. Do not `--recurse-submodules` (that would fetch the whole tree). Use the sparse init script:
 
 ```bash
 git clone https://github.com/tankcdr/conditional-holding-lock.git
@@ -45,42 +36,41 @@ cd conditional-holding-lock
 ./scripts/init-submodules.sh
 ```
 
-That pins `splice` to the CIP branch and sparse-checkouts `token-standard` only.
+`init-submodules.sh` pulls `localnet` (depth 1) and a blobless sparse checkout of `splice` (`token-standard` only). Do not `--recurse-submodules` on splice — the full tree is huge.
 
 ## Prerequisites
 
 ```bash
 curl https://get.digitalasset.com/install/install.sh | sh   # DPM
 dpm install 3.5.2
-# Java 17+ for `dpm test` (the script service). Java 11 is too old for SDK 3.5.2.
-export JAVA_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || echo "$JAVA_HOME")"
+# Java 17+ for `dpm test`
+docker compose version
 ```
 
-Foundry is optional and only needed for the EVM vector contract:
-
-```bash
-curl -L https://foundry.paradigm.xyz | bash && foundryup
-```
-
-## Build and test
+## Daml build and tests (no ledger)
 
 ```bash
 ./scripts/build-dars.sh
 ./scripts/test.sh
 ```
 
-`build-dars.sh` compiles packages in dependency order and symlinks `.daml/dist/<name>-<version>.dar` to `<name>-current.dar`, which is what Splice `daml.yaml` files point at. Outside Splice sbt/Nix, that symlink step is required.
+## Localnet (the canton-swap path)
 
-## Localnet overlay
+```bash
+cp .env.localnet.example .env.localnet
+./scripts/localnet.sh            # compose up, wait, upload CIP DARs
+./scripts/localnet.sh --down
+./scripts/localnet.sh --clean    # also drop volumes
+```
 
-Stock `cn-quickstart` / `splice-app` does not yet contain this package. Overlay it the same way Canton Swap overlays splice confs that the submodule pin has not rolled out: build the DARs here, then upload and vet them on a running localnet. See [`localnet-overrides/README.md`](localnet-overrides/README.md).
+| Service | Port |
+| --- | --- |
+| App-provider JSON API | 3975 |
+| App-user wallet UI | 2000 |
+| Scan UI | 4000 |
 
-## Splice PR shape
+Unpublished splice-app confs are mounted from `localnet-overrides/splice-0.6.7/` — same reason as canton-swap: quickstart’s confs still use pre-0.6.7 synchronizer-node keys. Unpublished CIP DARs are uploaded by `scripts/localnet-bootstrap.sh` via `POST /v2/packages`.
 
-The Daml work lives on the submodule branch. Open the Splice PR from
-https://github.com/tankcdr/splice/tree/cip-conditional-holding-lock
-against `canton-network/splice`. The API package is a drop-in under
-`token-standard/splice-api-token-conditional-lock-v1/`, copied from
-`splice-api-token-transfer-instruction-v2`. Guard evaluation lives in
-`splice-token-standard-utils` so every registry uses the same code. That is a
-CIP conformance property.
+## Splice PR
+
+Daml edits go in the `splice` submodule so the PR onto `canton-network/splice` is already a branch: https://github.com/tankcdr/splice/tree/cip-conditional-holding-lock

@@ -1,0 +1,162 @@
+# Splice Localnet — Canton Swap overlay pattern, without the swap product.
+#
+# Base confs come from the `localnet` submodule (digital-asset/cn-quickstart).
+# Splice ≥0.6.7 confs come from localnet-overrides/ because the quickstart pin
+# predates the synchronizer-nodes key rename.
+#
+# Usage: ./scripts/localnet.sh
+
+services:
+  canton:
+    image: "${SPLICE_IMAGE_REPO:-ghcr.io/digital-asset/decentralized-canton-sync/docker/}canton:${CANTON_VERSION:-${SPLICE_VERSION:-0.6.8}}"
+    container_name: canton
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/sv-auth-on.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/app-provider-auth-on.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/app-user-auth-on.env
+    environment:
+      DB_SERVER: localnet-postgres
+    volumes:
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/docker/canton/health-check.sh:/app/health-check.sh
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/canton/app.conf:/app/app.conf
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/canton/app-provider:/app/app-provider/on
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/canton/app-user:/app/app-user/on
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/canton/sv:/app/sv/on
+    ports:
+      - "4901:4901"
+      - "4902:4902"
+      - "4975:4975"
+      - "3901:3901"
+      - "3902:3902"
+      - "3975:3975"
+      - "2901:2901"
+      - "2902:2902"
+      - "2975:2975"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "([ \"$$APP_USER_PROFILE\" != on ] || wget -q -O /dev/null http://localhost:2900/health) && ([ \"$$APP_PROVIDER_PROFILE\" != on ] || wget -q -O /dev/null http://localhost:3900/health) && ([ \"$$SV_PROFILE\" != on ] || wget -q -O /dev/null http://localhost:4900/health)"]
+      interval: 20s
+      timeout: 30s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      localnet-postgres:
+        condition: service_healthy
+    restart: always
+    networks:
+      - localnet
+
+  splice:
+    image: "${SPLICE_IMAGE_REPO:-ghcr.io/digital-asset/decentralized-canton-sync/docker/}splice-app:${SPLICE_VERSION:-0.6.7}"
+    container_name: splice
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/splice.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/sv-auth-on.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/app-provider-auth-on.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/app-user-auth-on.env
+    environment:
+      DB_SERVER: localnet-postgres
+    volumes:
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/docker/splice/health-check.sh:/app/health-check.sh
+      - ./localnet-overrides/splice-0.6.7/conf/splice/app.conf:/app/app.conf
+      - ./localnet-overrides/splice-0.6.7/conf/splice/app-provider:/app/app-provider/on
+      - ./localnet-overrides/splice-0.6.7/conf/splice/app-user:/app/app-user/on
+      - ./localnet-overrides/splice-0.6.7/conf/splice/sv:/app/sv/on
+      - localnet-domain-upgrade-dump:/domain-upgrade-dump
+    healthcheck:
+      test: ["CMD", "bash", "-c", "([ \"$$APP_USER_PROFILE\" != on ] || wget -q -O /dev/null http://localhost:2$${VALIDATOR_ADMIN_API_PORT_SUFFIX}/api/validator/readyz) && ([ \"$$APP_PROVIDER_PROFILE\" != on ] || wget -q -O /dev/null http://localhost:3$${VALIDATOR_ADMIN_API_PORT_SUFFIX}/api/validator/readyz) && ([ \"$$SV_PROFILE\" != on ] || (wget -q -O /dev/null http://localhost:4$${VALIDATOR_ADMIN_API_PORT_SUFFIX}/api/validator/readyz && wget -q -O /dev/null http://localhost:5012/api/scan/readyz && wget -q -O /dev/null http://localhost:5014/api/sv/readyz))"]
+      interval: 20s
+      timeout: 40s
+      retries: 1000
+      start_period: 30s
+    ports:
+      - "4903:4903"
+      - "3903:3903"
+      - "2903:2903"
+    depends_on:
+      canton:
+        condition: service_healthy
+    restart: always
+    networks:
+      - localnet
+
+  localnet-postgres:
+    image: "postgres:14"
+    container_name: localnet-postgres
+    volumes:
+      - localnet-pgdata:/var/lib/postgresql/data
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/docker/postgres/postgres-entrypoint.sh:/postgres-entrypoint.sh
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/postgres.env
+    ports:
+      - "5433:5432"
+    entrypoint: /postgres-entrypoint.sh
+    healthcheck:
+      test: "pg_isready -U cnadmin -d postgres"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    user: "postgres"
+    command:
+      - postgres
+      - -c
+      - max_connections=1000
+    networks:
+      - localnet
+
+  wallet-web-ui-app-user:
+    image: "${SPLICE_IMAGE_REPO:-ghcr.io/digital-asset/decentralized-canton-sync/docker/}wallet-web-ui:${SPLICE_VERSION:-0.6.7}"
+    container_name: wallet-web-ui-app-user
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+    networks:
+      - localnet
+
+  wallet-web-ui-app-provider:
+    image: "${SPLICE_IMAGE_REPO:-ghcr.io/digital-asset/decentralized-canton-sync/docker/}wallet-web-ui:${SPLICE_VERSION:-0.6.7}"
+    container_name: wallet-web-ui-app-provider
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+    networks:
+      - localnet
+
+  scan-web-ui:
+    image: "${SPLICE_IMAGE_REPO:-ghcr.io/digital-asset/decentralized-canton-sync/docker/}scan-web-ui:${SPLICE_VERSION:-0.6.7}"
+    container_name: scan-web-ui
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+    networks:
+      - localnet
+
+  localnet-nginx:
+    image: "nginx:1.27.0"
+    container_name: localnet-nginx
+    env_file:
+      - ${LOCALNET_ENV_DIR:-./localnet/quickstart/docker/modules/localnet/env}/common.env
+    volumes:
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/nginx/app-provider.conf:/etc/nginx/templates/app-provider.conf.template
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/nginx/app-user.conf:/etc/nginx/templates/app-user.conf.template
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/nginx/sv.conf:/etc/nginx/templates/sv.conf.template
+      - ${LOCALNET_DIR:-./localnet/quickstart/docker/modules/localnet}/conf/nginx/swagger-ui:/etc/nginx/includes
+    ports:
+      - "2000:2000"
+      - "4000:4000"
+    depends_on:
+      splice:
+        condition: service_healthy
+    restart: always
+    networks:
+      - localnet
+
+volumes:
+  localnet-pgdata:
+  localnet-domain-upgrade-dump:
+
+networks:
+  localnet:
+    name: localnet
+    driver: bridge

@@ -1,28 +1,23 @@
-# Localnet overlay for unpublished Splice packages
+# Localnet overlays (canton-swap pattern)
 
-Canton Swap's `localnet-overrides/splice-0.6.7/` is the pattern: the `cn-quickstart` submodule pin ships configs (or DARs) older than the Splice line you actually run, so you mount a local tree into the splice container instead of waiting for the submodule bump.
+The `localnet` submodule is `digital-asset/cn-quickstart` pinned to the same
+SHA canton-swap uses (`fe56d46`). Two kinds of change are not in that pin:
 
-This CIP is the same kind of change. `splice-app` on localnet does not yet contain `splice-api-token-conditional-lock-v1`. Until it does:
+## 1. Splice confs (`splice-0.6.7/`)
 
-1. Build DARs here with `./scripts/build-dars.sh`.
-2. Start localnet from `digital-asset/cn-quickstart` (or the Canton Swap compose overlay).
-3. Upload and vet the new DARs on the app-provider participant, the same way Canton Swap's `scripts/localnet-bootstrap.sh` uploads `id-ccse-v2` after the ledger is up.
-4. Pin the package in whatever catalog your app uses (`dars.lock`, a JSON pin file, or a wallet `supportedApis` advertisement).
+Verbatim `cluster/compose/localnet/conf/splice/*` from splice-app v0.6.7.
+Quickstart still has pre-0.6.7 keys (`sequencer-admin-client`); 0.6.7 renamed
+them to `synchronizer-nodes.current`. `docker-compose.localnet.yml` mounts
+these files into the splice container. Delete once the submodule is bumped.
 
-Do not hand-patch a running ledger as a substitute for wiring the upload into bootstrap. Once Splice main ships the package, delete this overlay.
+## 2. CIP DARs
 
-DAR paths after a local build:
+`splice-app` does not contain `splice-api-token-conditional-lock-v1`.
+`scripts/localnet-bootstrap.sh` builds the DARs and `POST`s them to
+`http://localhost:3975/v2/packages`, the same HTTP upload path canton-swap
+uses for `id-ccse-v2`.
 
+```bash
+./scripts/localnet.sh              # compose up + bootstrap
+./scripts/localnet-bootstrap.sh    # re-upload onto a running box
 ```
-splice/token-standard/splice-api-token-conditional-lock-v1/.daml/dist/splice-api-token-conditional-lock-v1-1.0.0.dar
-splice/token-standard/splice-token-standard-utils/.daml/dist/splice-token-standard-utils-2.0.0.dar
-splice/token-standard/examples/splice-test-token-v2/.daml/dist/splice-test-token-v2-1.0.1.dar
-```
-
-The factory must be created by the instrument admin (`TokenRules` in the TestTokenV2 reference registry). Wallets discover it through:
-
-```
-POST /registry/conditional-lock/v1/lock-factory
-```
-
-See `splice/token-standard/splice-api-token-conditional-lock-v1/openapi/conditional-lock-v1.yaml`.

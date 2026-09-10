@@ -1,0 +1,15 @@
+{
+  "name": "conditional-holding-lock",
+  "private": true,
+  "scripts": {
+    "setup": "./scripts/init-submodules.sh",
+    "build:dars": "./scripts/build-dars.sh",
+    "test": "./scripts/test.sh",
+    "localnet": "./scripts/localnet.sh",
+    "localnet:down": "./scripts/localnet.sh --down",
+    "localnet:clean": "./scripts/localnet.sh --clean",
+    "localnet:bootstrap": "./scripts/localnet-bootstrap.sh",
+    "localnet:status": "./scripts/lib/localnet-compose.sh ps",
+    "localnet:logs": "./scripts/lib/localnet-compose.sh logs -f"
+  }
+}

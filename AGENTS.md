@@ -1,11 +1,14 @@
 # Conditional Holding Lock
 
-Daml 3.5.2, LF 2.1, against Splice main (`SPLICE_PIN`).
+Daml 3.5.2, LF 2.1.
 
-`splice/` is a git submodule of https://github.com/tankcdr/splice on branch
-`cip-conditional-holding-lock`. After clone run `./scripts/init-submodules.sh`
-(blobless sparse checkout of `token-standard`). Daml edits go in the submodule
-so the Splice PR is `git -C splice diff canton-network/splice/main`.
+This repo follows canton-swap-monorepo’s localnet layout:
+
+- `localnet/` submodule is `digital-asset/cn-quickstart` — how you run Canton.
+- `localnet-overrides/` holds splice confs the quickstart pin does not ship.
+- `scripts/localnet.sh` starts compose and uploads unpublished CIP DARs.
+- `splice/` submodule is the CIP fork (`tankcdr/splice`, `cip-conditional-holding-lock`)
+  — how you PR onto Splice. After clone run `./scripts/init-submodules.sh`.
 
 - Build DARs with `./scripts/build-dars.sh`. It symlinks `*-current.dar`.
 - Test with `./scripts/test.sh`. Needs Java 17+ (`dpm test` script service).

@@ -2,3 +2,6 @@
 	path = splice
 	url = https://github.com/tankcdr/splice.git
 	branch = cip-conditional-holding-lock
+[submodule "localnet"]
+	path = localnet
+	url = https://github.com/digital-asset/cn-quickstart.git

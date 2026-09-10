@@ -5,6 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+git submodule update --init --depth 1 localnet
+echo "localnet @ $(git -C localnet rev-parse --short HEAD) (cn-quickstart)"
+
 git submodule update --init --filter=blob:none --checkout splice
 git -C splice sparse-checkout init --cone
 git -C splice sparse-checkout set token-standard
