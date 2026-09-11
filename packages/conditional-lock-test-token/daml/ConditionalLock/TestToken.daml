@@ -1,0 +1,281 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+-- | First-party reference adapter over the published TestTokenV2 DAR.
+-- The registry admin remains the trusted issuer, as in TestTokenV2.
+module ConditionalLock.TestToken where
+
+import DA.List (dedup)
+import DA.Action (when)
+import DA.Foldable (forA_)
+import DA.TextMap qualified as TextMap
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1 qualified as V1
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.TransferEventsV2 qualified as Events
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 qualified as Token
+import Splice.TokenStandard.Utils (downcast)
+import ConditionalLock.Policy
+
+-- A registry-issued, single-use factory gives the workflow its stable ID.
+-- The registry must issue distinct IDs. No contract IDs are converted to text.
+template Factory with
+    admin : Party
+    tokenRulesCid : ContractId Token.TokenRules
+    lockId : Text
+  where
+    signatory admin
+    ensure lockId /= ""
+
+    interface instance CL.ConditionalLockFactory for Factory where
+      view = CL.ConditionalLockFactoryView admin limits
+      conditionalLockFactory_lockExtraObservers arg = namedParties arg.terms
+      conditionalLockFactory_publicFetchImpl _ _ = pure (CL.ConditionalLockFactoryView admin limits)
+      conditionalLockFactory_lockImpl self arg = do
+        now <- getTime
+        validateTerms admin now arg.terms
+        requireActors "owner account must authorize funding" (accountParties arg.terms.owner) arg.actors
+        rules <- fetch tokenRulesCid
+        assertMsg "wrong TestTokenV2 rules admin" (rules.admin == admin)
+        total <- consumeInputs arg.terms arg.inputHoldingCids
+        assertMsg "insufficient input holdings" (total >= arg.terms.amount)
+        archive (coerceContractId self : ContractId Factory)
+        let meta = resultMetadata "lock" "conditional lock"
+        change <- if total > arg.terms.amount
+          then fmap pure (issue arg.terms arg.terms.owner (total - arg.terms.amount) meta)
+          else pure []
+        let accepted = filter (\a -> authorized (accountParties a) arg.actors) (termReceivers arg.terms)
+        (result, state) <- start tokenRulesCid lockId arg.terms accepted [] 0
+        report state arg.terms.owner arg.inputHoldingCids (change <> [toInterfaceContractId state.holdingCid]) [] meta
+        let output = case result.output of
+              CL.ConditionalLockResult_Locked lockCid holdingCid _ ->
+                CL.ConditionalLockResult_Locked lockCid holdingCid change
+              other -> other
+        pure result with output
+
+-- Backing holdings use a distinct template, so an ordinary TestTokenV2 transfer
+-- cannot spend them when its generic expiry check passes. Every release goes
+-- through the policy. In particular, a non-Unlock fallback cannot be bypassed.
+template LockedHolding with
+    terms : CL.LockTerms
+    accepted : [V2.Account]
+  where
+    signatory terms.instrumentId.admin, accountParties terms.owner, concatMap accountParties accepted
+    observer namedParties terms
+    ensure terms.amount > 0.0 && all (`elem` termReceivers terms) accepted
+    interface instance V2.Holding for LockedHolding where
+      view = holdingView terms
+    interface instance V1.Holding for LockedHolding where
+      view = downcast (holdingView terms)
+    -- Stakeholders can report events without fetching the private TokenRules.
+    -- The policy exercises this before archiving the backing in the same tx.
+    interface instance Events.EventLog for LockedHolding where
+      view = Events.EventLogView terms.instrumentId.admin emptyMetadata
+      eventLog_holdingsChangeImpl _ arg = do
+        assertMsg "event admin must match instrument" (arg.admin == terms.instrumentId.admin)
+        pure Events.EventLog_HoldingsChangeResult
+
+holdingView : CL.LockTerms -> V2.HoldingView
+holdingView terms = V2.HoldingView with
+  account = terms.owner
+  instrumentId = terms.instrumentId
+  amount = terms.amount
+  lock = Some $ V2.Lock (namedParties terms) (Some terms.expiresAt) None (Some lockContext)
+  meta = Metadata $ TextMap.insert (prefix <> "lock-context") lockContext $
+    TextMap.insert (prefix <> "tx-kind") "lock" terms.meta.values
+
+lockContext : Text
+lockContext = "conditional holding lock"
+
+data State = State with
+    tokenRulesCid : ContractId Token.TokenRules
+    lockId : Text
+    terms : CL.LockTerms
+    accepted : [V2.Account]
+    holdingCid : ContractId LockedHolding
+    spentRules : [Text]
+    revision : Int
+  deriving (Eq, Show, Serializable)
+
+stateSignatories : State -> [Party]
+stateSignatories s = dedup $ [s.terms.instrumentId.admin] <> accountParties s.terms.owner <>
+  concatMap accountParties s.accepted
+
+pending : State -> [V2.Account]
+pending s = filter (`notElem` s.accepted) (termReceivers s.terms)
+
+template Instruction with
+    state : State
+  where
+    signatory stateSignatories state
+    observer namedParties state.terms
+    ensure not (null (pending state))
+
+    interface instance CL.ConditionalLockInstruction for Instruction where
+      view = CL.ConditionalLockInstructionView state.terms (pending state) (resultMetadata "lock" "awaiting acceptance")
+      conditionalLockInstruction_acceptImpl self arg = do
+        now <- getTime
+        assertMsg "cannot accept an expired instruction" (now < state.terms.expiresAt)
+        assertMsg "receiver is not pending" (arg.receiver `elem` pending state)
+        requireActors "receiver account must authorize acceptance" (accountParties arg.receiver) arg.actors
+        archive (coerceContractId self : ContractId Instruction)
+        consumeBacking state
+        (result, next) <- start state.tokenRulesCid state.lockId state.terms
+          (dedup (arg.receiver :: state.accepted)) state.spentRules (state.revision + 1)
+        report next state.terms.owner [toInterfaceContractId state.holdingCid]
+          [toInterfaceContractId next.holdingCid] [] result.meta
+        pure result
+      conditionalLockInstruction_rejectImpl self arg = do
+        assertMsg "receiver is not named in the terms" (arg.receiver `elem` termReceivers state.terms)
+        requireActors "receiver account must authorize rejection" (accountParties arg.receiver) arg.actors
+        archive (coerceContractId self : ContractId Instruction)
+        withdraw state "receiver rejected"
+      conditionalLockInstruction_withdrawImpl self arg = do
+        requireActors "owner account must authorize withdrawal" (accountParties state.terms.owner) arg.actors
+        archive (coerceContractId self : ContractId Instruction)
+        withdraw state "owner withdrew"
+
+template ActiveLock with
+    state : State
+  where
+    -- Acceptance becomes persistent ledger authority, not just a Boolean flag.
+    -- These signatories authorize child updates even when only an enactor acts.
+    signatory stateSignatories state
+    observer namedParties state.terms
+    ensure null (pending state)
+
+    interface instance CL.ConditionalLock for ActiveLock where
+      view = CL.ConditionalLockView state.lockId state.terms
+        (toInterfaceContractId state.holdingCid) (resultMetadata "lock" "active")
+      conditionalLock_enactImpl self arg = do
+        now <- getTime
+        assertMsg "rules cannot fire at or after expiry" (now < state.terms.expiresAt)
+        rule <- optional (abort "unknown or already spent rule") pure (find (\r -> r.id == arg.ruleId) state.terms.rules)
+        assertMsg "an entitled enactor must act" (any (`elem` arg.actors) rule.enactors)
+        assertMsg "at most 8 preimages" (length arg.witness.preimages <= 8)
+        assertMsg "guard not satisfied" (satisfied now arg.actors arg.witness rule.guard)
+        legs <- resolveOutcome state.terms rule.outcome arg.legs
+        archive (coerceContractId self : ContractId ActiveLock)
+        enact state rule.id legs (filter (\r -> r.id /= rule.id) state.terms.rules)
+          (rule.id :: state.spentRules)
+      conditionalLock_expireImpl self arg = do
+        now <- getTime
+        assertMsg "fallback cannot fire before expiry" (now >= state.terms.expiresAt)
+        requireActors "owner account must authorize expiry" (accountParties state.terms.owner) arg.actors
+        legs <- resolveOutcome state.terms state.terms.fallback arg.legs
+        archive (coerceContractId self : ContractId ActiveLock)
+        enact state "fallback" legs [] state.spentRules
+      conditionalLock_cancelImpl self arg = do
+        requireActors "cancellation requires unanimity" (accountParties state.terms.owner <> namedParties state.terms) arg.actors
+        archive (coerceContractId self : ContractId ActiveLock)
+        enact state "cancel" [CL.Leg state.terms.owner state.terms.amount] [] state.spentRules
+      conditionalLock_amendImpl self arg = do
+        now <- getTime
+        assertMsg "cannot amend an expired lock" (now < state.terms.expiresAt)
+        requireActors "amendment requires unanimity" (accountParties state.terms.owner <> namedParties state.terms) arg.actors
+        assertMsg "amendment cannot change owner or instrument" $
+          arg.newTerms.owner == state.terms.owner && arg.newTerms.instrumentId == state.terms.instrumentId
+        validateTerms state.terms.instrumentId.admin now arg.newTerms
+        assertMsg "amendment cannot resurrect spent rule IDs" $
+          all (\r -> r.id `notElem` state.spentRules) arg.newTerms.rules
+        topUp <- consumeInputs state.terms arg.additionalInputHoldingCids
+        assertMsg "amended amount must equal remainder plus top-up" (arg.newTerms.amount == state.terms.amount + topUp)
+        archive (coerceContractId self : ContractId ActiveLock)
+        consumeBacking state
+        let accepted = filter (\a -> a `elem` state.accepted || authorized (accountParties a) arg.actors) (termReceivers arg.newTerms)
+        (result, next) <- start state.tokenRulesCid state.lockId arg.newTerms accepted state.spentRules (state.revision + 1)
+        report next state.terms.owner (toInterfaceContractId state.holdingCid :: arg.additionalInputHoldingCids)
+          [toInterfaceContractId next.holdingCid] [] result.meta
+        pure result
+
+start : ContractId Token.TokenRules -> Text -> CL.LockTerms -> [V2.Account] -> [Text] -> Int
+  -> Update (CL.ConditionalLockResult, State)
+start tokenRulesCid lockId terms accepted spentRules revision = do
+  holdingCid <- create LockedHolding with terms; accepted
+  let state = State with tokenRulesCid; lockId; terms; accepted; holdingCid; spentRules; revision
+  output <- if null (pending state) then do
+    cid <- create (ActiveLock state)
+    pure $ CL.ConditionalLockResult_Locked (toInterfaceContractId cid) (toInterfaceContractId holdingCid) []
+    else do
+      cid <- create (Instruction state)
+      pure $ CL.ConditionalLockResult_Pending (toInterfaceContractId cid)
+  pure (CL.ConditionalLockResult output (resultMetadata "lock" "conditional lock"), state)
+
+consumeInputs : CL.LockTerms -> [ContractId V2.Holding] -> Update Decimal
+consumeInputs terms cids = do
+  assertMsg "input holdings must be unique" (dedup cids == cids)
+  amounts <- forA cids $ \cid -> do
+    token <- Token.fetchAndArchiveUnlockedToken terms.instrumentId terms.owner (coerceContractId cid)
+    pure token.holding.amount
+  pure (sum amounts)
+
+consumeBacking : State -> Update ()
+consumeBacking s = do
+  holding <- fetch s.holdingCid
+  assertMsg "backing holding does not match the policy" (holding.terms == s.terms && holding.accepted == s.accepted)
+  archive s.holdingCid
+
+issue : CL.LockTerms -> V2.Account -> Decimal -> Metadata -> Update (ContractId V2.Holding)
+issue terms account amount meta = do
+  cid <- create $ Token.Token (V2.HoldingView account terms.instrumentId amount None meta)
+  pure (toInterfaceContractId cid)
+
+withdraw : State -> Text -> Update CL.ConditionalLockResult
+withdraw s reason = do
+  let meta = resultMetadata "unlock" reason
+  cid <- issue s.terms s.terms.owner s.terms.amount meta
+  report s s.terms.owner [toInterfaceContractId s.holdingCid] [cid] [] meta
+  consumeBacking s
+  pure (CL.ConditionalLockResult CL.ConditionalLockResult_Failed meta)
+
+enact : State -> Text -> [CL.Leg] -> [CL.Rule] -> [Text] -> Update CL.ConditionalLockResult
+enact s ruleId legs rules spentRules = do
+  let kind = if any (\l -> l.receiver /= s.terms.owner) legs then "transfer" else "unlock"
+  let meta = Metadata $ TextMap.insert (prefix <> "conditional-lock/rule-id") ruleId (resultMetadata kind ruleId).values
+  outputs <- forA legs $ \leg -> do
+    cid <- issue s.terms leg.receiver leg.amount meta
+    pure (leg, cid)
+  let remaining = s.terms.amount - sum (map (.amount) legs)
+  next <- if remaining == 0.0 then pure None else do
+    let terms = s.terms with amount = remaining; rules
+    (result, state) <- start s.tokenRulesCid s.lockId terms
+      (filter (`elem` termReceivers terms) s.accepted) spentRules (s.revision + 1)
+    case result.output of
+      CL.ConditionalLockResult_Locked lockCid holdingCid _ -> pure (Some (lockCid, holdingCid))
+      _ -> abort "a continuation cannot require new acceptance"
+  let ownerOutputs = map snd $ filter (\(l, _) -> l.receiver == s.terms.owner) outputs
+  let receiverOutputs = map snd $ filter (\(l, _) -> l.receiver /= s.terms.owner) outputs
+  let numbered = zip [0 .. length outputs - 1] outputs
+  let side direction other i leg = Events.TransferLegSide with
+        -- CIP-0112 requires a distinct ID per leg, including repeated fallbacks.
+        transferLegId = s.lockId <> "/" <> ruleId <> "/" <> show s.revision <> "/" <> show i
+        side = direction
+        otherside = other
+        amount = leg.amount
+        instrumentId = s.terms.instrumentId.id
+        meta
+  let outgoing = [ side Events.SenderSide leg.receiver i leg
+                 | (i, (leg, _)) <- numbered, leg.receiver /= s.terms.owner ]
+  report s s.terms.owner [toInterfaceContractId s.holdingCid]
+    (ownerOutputs <> optional [] (pure . snd) next) outgoing meta
+  forA_ (dedup (map (.receiver) legs)) $ \account -> when (account /= s.terms.owner) $ do
+    let received = [ cid | (_, (leg, cid)) <- numbered, leg.receiver == account ]
+    let incoming = [ side Events.ReceiverSide s.terms.owner i leg
+                   | (i, (leg, _)) <- numbered, leg.receiver == account ]
+    report s account [] received incoming meta
+  consumeBacking s
+  pure $ CL.ConditionalLockResult
+    (CL.ConditionalLockResult_Enacted receiverOutputs ownerOutputs (fmap fst next)) meta
+
+report : State -> V2.Account -> [ContractId V2.Holding] -> [ContractId V2.Holding]
+  -> [Events.TransferLegSide] -> Metadata -> Update ()
+report s account inputs outputs sides meta = do
+  _ <- exercise (toInterfaceContractId s.holdingCid : ContractId Events.EventLog) Events.EventLog_HoldingsChange with
+    admin = s.terms.instrumentId.admin
+    account
+    inputHoldingCids = inputs
+    outputHoldingCids = outputs
+    transferLegSides = sides
+    observers = accountParties account
+    extraArgs = ExtraArgs emptyChoiceContext meta
+  pure ()

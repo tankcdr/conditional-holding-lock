@@ -1,12 +1,25 @@
 # Hash-vector runbook
 
-Preimages are 32 raw bytes, written as 64 lowercase hex characters. Daml hashes the **decoded bytes** with `DA.Crypto.Text.sha256` and `DA.Crypto.Text.keccak256`. EVM hashes the same bytes with `sha256(bytes32)` and `keccak256(bytes32)`.
+Preimages are 32 raw bytes, represented as 64 hex characters without a `0x` prefix. The policy accepts uppercase input by normalizing to lowercase before validating it. Digests in terms must already be lowercase.
 
-Do not hash the UTF-8 of the hex string. `DA.Text.sha256` does that and will not match an EVM HTLC.
+Daml uses `DA.Crypto.Text.sha256` and `DA.Crypto.Text.keccak256`, which decode the hex before hashing. Solidity uses `sha256(abi.encodePacked(preimage))` and `keccak256(abi.encodePacked(preimage))` with a `bytes32` input. `DA.Text.sha256` hashes UTF-8 text and is deliberately checked to produce a different value.
 
-Vectors live in `fixtures/hash-vectors.json` and are asserted in:
+The six vectors in `fixtures/hash-vectors.json` cover zero, repeated `01`, repeated `ff`, repeated `deadbeef`, ascending bytes, and leading-zero/high-bit bytes. Neither test suite computes its expected digests from the implementation under test.
 
-- `splice/token-standard/examples/splice-test-token-conditional-lock-test/.../TestConditionalLock.daml` (`test_hashVectorsMatchEvm`)
-- `contracts/evm/test/HashVectors.t.sol`
+Generated constants live in:
 
-Confirmed on SDK 3.5.2: both Daml builtins match the EVM precompiles/builtins on the four shared vectors (zero, `0x01` repeated, `0xff` repeated, `deadbeef` repeated).
+- `packages/conditional-lock-test/daml/Generated/HashVectors.daml`
+- `contracts/evm/test/generated/HashVectorData.sol`
+
+To update reviewed fixtures and regenerate both languages:
+
+```bash
+python3 scripts/generate-hash-vectors.py
+python3 scripts/generate-hash-vectors.py --check
+./scripts/test.sh
+./scripts/test-compatibility.sh
+```
+
+The normal test command fails if either generated file differs from the JSON. It also fails if Foundry is unavailable. No test downloads an unpinned Solidity library.
+
+`TestHashVectors.daml` checks both raw Daml builtins and the exact helper used by the lock implementation, including uppercase normalization and malformed input rejection. `TestConditionalLock.daml` exercises both SHA-256 and Keccak guards in actual ledger transactions. The [Step 1 report](step-1.md) describes runtime validation.

@@ -1,41 +1,33 @@
 -- Copyright (c) 2026 Long Run Advisory. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
-
 module TestHashVectors where
 
 import DA.Assert
-import DA.Text qualified as T
+import DA.Foldable (forA_)
+import DA.Text qualified as Text
 import DA.Crypto.Text qualified as Crypto
 import Daml.Script
 import Splice.Api.Token.ConditionalLockV1 qualified as CL
-
-hashPreimage : CL.HashAlgorithm -> Text -> Text
-hashPreimage CL.Sha256 preimage = Crypto.sha256 (T.asciiToLower preimage)
-hashPreimage CL.Keccak256 preimage = Crypto.keccak256 (T.asciiToLower preimage)
-
-preimageZero = "0000000000000000000000000000000000000000000000000000000000000000"
-sha256Zero = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
-keccak256Zero = "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
-
-preimage01 = "0101010101010101010101010101010101010101010101010101010101010101"
-sha256_01 = "72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793"
-keccak256_01 = "cebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc"
-
-preimageFf = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-sha256Ff = "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051"
-keccak256Ff = "a9c584056064687e149968cbab758a3376d22aedc6a55823d1b3ecbee81b8fb9"
-
-preimageDeadBeef = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-sha256DeadBeef = "8200cf0ce11447bf6353cbac964d07d1c390d61d07e6c5d0214450b3add6449b"
-keccak256DeadBeef = "86c47f76ff4a6cb8ee9c172982eda47e895262b5a6a7582aaf7d97295ce1d8d4"
+import ConditionalLock.Policy (hashPreimage)
+import Generated.HashVectors (vectors)
 
 test_hashVectorsMatchEvm : Script ()
-test_hashVectorsMatchEvm = do
-  hashPreimage CL.Sha256 preimageZero === sha256Zero
-  hashPreimage CL.Keccak256 preimageZero === keccak256Zero
-  hashPreimage CL.Sha256 preimage01 === sha256_01
-  hashPreimage CL.Keccak256 preimage01 === keccak256_01
-  hashPreimage CL.Sha256 preimageFf === sha256Ff
-  hashPreimage CL.Keccak256 preimageFf === keccak256Ff
-  hashPreimage CL.Sha256 preimageDeadBeef === sha256DeadBeef
-  hashPreimage CL.Keccak256 preimageDeadBeef === keccak256DeadBeef
+test_hashVectorsMatchEvm = forA_ vectors $ \(_, preimage, sha, keccak) -> do
+  Crypto.sha256 preimage === sha
+  Crypto.keccak256 preimage === keccak
+  hashPreimage CL.Sha256 preimage === Some sha
+  hashPreimage CL.Keccak256 preimage === Some keccak
+  hashPreimage CL.Sha256 (Text.asciiToUpper preimage) === Some sha
+  hashPreimage CL.Keccak256 (Text.asciiToUpper preimage) === Some keccak
+  assert (Text.sha256 preimage /= sha)
+
+test_invalidPreimagesAreRejectedBeforeHashing : Script ()
+test_invalidPreimagesAreRejectedBeforeHashing = do
+  let zero = repeatText 64 "0"
+  forA_ ["", "00", repeatText 63 "0", repeatText 65 "0", "0x" <> zero,
+          repeatText 64 "g", repeatText 64 "é", zero <> " "] $ \preimage -> do
+    hashPreimage CL.Sha256 preimage === None
+    hashPreimage CL.Keccak256 preimage === None
+
+repeatText : Int -> Text -> Text
+repeatText n t = Text.implode (replicate n t)
