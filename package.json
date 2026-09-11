@@ -1,11 +1,16 @@
 {
   "name": "conditional-holding-lock",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "setup": "./scripts/init-submodules.sh && ./scripts/fetch-dars.sh",
     "fetch-dars": "./scripts/fetch-dars.sh",
     "build:dars": "./scripts/build-dars.sh",
     "test": "./scripts/test.sh",
+    "test:solana": "./scripts/test-solana.sh",
+    "test:compatibility": "./scripts/test-compatibility.sh",
+    "check:compatibility": "python3 ./scripts/check-compatibility.py",
+    "check:vectors": "python3 ./scripts/generate-hash-vectors.py --check",
     "localnet": "./scripts/localnet.sh",
     "localnet:down": "./scripts/localnet.sh --down",
     "localnet:clean": "./scripts/localnet.sh --clean",

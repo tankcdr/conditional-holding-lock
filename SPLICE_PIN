@@ -1,9 +1,40 @@
-# Interface DARs come from this tree; we do not vendor Splice source.
-dars-url: https://raw.githubusercontent.com/canton-network/splice/main/daml/dars
-ref: main
-packages:
-  - splice-api-token-metadata-v1-1.0.0.dar
-  - splice-api-token-holding-v2-1.0.0.dar
-sdk: 3.5.2
-lf: 2.1
-fetch: ./scripts/fetch-dars.sh
+{
+  "repository": "canton-network/splice",
+  "ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+  "tracked_branch": "main",
+  "checked_at": "2026-09-11",
+  "sdk": "3.5.2",
+  "lf": "2.1",
+  "packages": [
+    {
+      "file": "splice-api-token-holding-v1-1.0.0.dar",
+      "sha256": "ef75f8eb41a65810221784fdb78bb9dfac7cb22245aba14fa7cb7f69c34e0175",
+      "package_id": "718a0f77e505a8de22f188bd4c87fe74101274e9d4cb1bfac7d09aec7158d35b"
+    },
+    {
+      "file": "splice-api-token-holding-v2-1.0.0.dar",
+      "sha256": "f044b34d7a28c2b6c8a540af720297d55450a889b451dc4eed64a9914f1d6b00",
+      "package_id": "4b7ecfc366d79ccc5ed07c80f26fe489cf2dfd43ce2856c06a78e6a048db7032"
+    },
+    {
+      "file": "splice-api-token-metadata-v1-1.0.0.dar",
+      "sha256": "455eb160cb5abd4ae9918a6fbb9dad471f721adda39f0e5c76feef08d05637fc",
+      "package_id": "4ded6b668cb3b64f7a88a30874cd41c75829f5e064b3fbbadf41ec7e8363354f"
+    },
+    {
+      "file": "splice-api-token-transfer-events-v2-1.0.0.dar",
+      "sha256": "9a1ebe5aece0a7f1a49069fd7aba0ced92c4ae94e5e3d49cdb097733a87dddbc",
+      "package_id": "5c1097a9bad0af4bcfe6d3fb0fe55112d3d11f18eae57ddfb14c20836fee226c"
+    },
+    {
+      "file": "splice-test-token-v2-1.0.1.dar",
+      "sha256": "1d6f5a296a6fedd18ff71dd29bfbf15b9f971303611d1ab49e5c08442fc37a57",
+      "package_id": "6f2bddc934eb700ee00afa209eb1d49f861af6401037618f6aa7e6ac02c8e201"
+    },
+    {
+      "file": "splice-token-standard-utils-2.0.0.dar",
+      "sha256": "3346dedf1c4617e92858fe93d6f9c81ebb1a92a6d809378f487e516aa8f877fc",
+      "package_id": "9a8f41a2b1456d357dee5677565c21b9a5aa45b80f0ed6be469694445dd4f6e1"
+    }
+  ]
+}

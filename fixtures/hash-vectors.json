@@ -1,5 +1,5 @@
 {
-  "domain": "raw 32-byte preimage, hex-encoded lowercase. Daml: DA.Crypto.Text.{sha256,keccak256}. EVM: sha256(bytes32) / keccak256(bytes32).",
+  "domain": "raw 32-byte preimage, hex-encoded lowercase. Daml: DA.Crypto.Text.{sha256,keccak256}. EVM: sha256(bytes32) / keccak256(bytes32). Solana: sol_sha256 / sol_keccak256 over the decoded bytes.",
   "vectors": [
     {
       "id": "zero",
@@ -24,6 +24,18 @@
       "preimage": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       "sha256": "8200cf0ce11447bf6353cbac964d07d1c390d61d07e6c5d0214450b3add6449b",
       "keccak256": "86c47f76ff4a6cb8ee9c172982eda47e895262b5a6a7582aaf7d97295ce1d8d4"
+    },
+    {
+      "id": "ascending-bytes",
+      "preimage": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "sha256": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+      "keccak256": "8ae1aa597fa146ebd3aa2ceddf360668dea5e526567e92b0321816a4e895bd2d"
+    },
+    {
+      "id": "leading-zero-high-bit",
+      "preimage": "0080ff0100000000000000000000000000000000000000000000000000000000",
+      "sha256": "473d256acf290cb6134b269b43b6fe707d2400f7629286bd85b04de0d5fc3f83",
+      "keccak256": "6e9da9f753d6775e09a04bdef65adc748ef2520dcf8839365ce12efa52c491e3"
     }
   ]
 }

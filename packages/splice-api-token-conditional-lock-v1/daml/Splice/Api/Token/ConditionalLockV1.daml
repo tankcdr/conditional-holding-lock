@@ -265,7 +265,7 @@ interface ConditionalLock where
     do conditionalLock_expireImpl this self arg
 
   nonconsuming choice ConditionalLock_Cancel : ConditionalLockResult
-    -- ^ Return the full remaining amount to the owner unlocked, before expiry, with the
+    -- ^ Return the full remaining amount to the owner unlocked, including after expiry, with the
     -- consent of every named party.
     with
       actors : [Party]

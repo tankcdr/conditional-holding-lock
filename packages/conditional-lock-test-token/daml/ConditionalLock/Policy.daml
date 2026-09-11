@@ -1,0 +1,139 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module ConditionalLock.Policy where
+
+import DA.List (dedup)
+import DA.Foldable (forA_)
+import DA.Optional (isSome, optionalToList)
+import DA.Text qualified as Text
+import DA.TextMap qualified as TextMap
+import DA.Crypto.Text qualified as Crypto
+import DA.Time
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV2
+import Splice.Api.Token.ConditionalLockV1
+
+-- This reference registry requires both owner and provider, when present.
+-- No standing preapprovals or mutable account-policy configuration are used.
+accountParties : Account -> [Party]
+accountParties account = dedup (optionalToList account.owner <> optionalToList account.provider)
+
+outcomeReceivers : Outcome -> [Account]
+outcomeReceivers Outcome_Unlock = []
+outcomeReceivers (Outcome_Transfer legs) = map (.receiver) legs
+outcomeReceivers (Outcome_Distribute receivers) = receivers
+
+termReceivers : LockTerms -> [Account]
+termReceivers terms = filter (/= terms.owner) $ dedup $
+  concatMap (outcomeReceivers . (.outcome)) terms.rules <> outcomeReceivers terms.fallback
+
+guardParties : Guard -> [Party]
+guardParties (Guard_Parties parties _) = parties
+guardParties (Guard_All guards) = concatMap guardParties guards
+guardParties (Guard_Any guards) = concatMap guardParties guards
+guardParties _ = []
+
+namedParties : LockTerms -> [Party]
+namedParties terms = filter (`notElem` accountParties terms.owner) $ dedup $
+  concatMap accountParties (termReceivers terms) <>
+  concatMap (\r -> r.enactors <> guardParties r.guard) terms.rules
+
+authorized : [Party] -> [Party] -> Bool
+authorized required actors = all (`elem` actors) required
+
+requireActors : Text -> [Party] -> [Party] -> Update ()
+requireActors label required actors = assertMsg label (authorized required actors)
+
+prefix : Text
+prefix = "splice.lfdecentralizedtrust.org/"
+
+metadata : [(Text, Text)] -> Metadata
+metadata = Metadata . TextMap.fromList
+
+resultMetadata : Text -> Text -> Metadata
+resultMetadata kind reason = metadata [(prefix <> "tx-kind", kind), (prefix <> "reason", reason)]
+
+limits : Metadata
+limits = metadata $ map (\(k, v) -> (prefix <> "conditional-lock/" <> k, v))
+  [ ("max-rules", "8"), ("max-legs", "8"), ("max-guard-depth", "3")
+  , ("max-duration", "P365D"), ("min-duration", "PT1S")
+  , ("max-guard-children", "8"), ("max-preimages", "8") ]
+
+isHex32 : Text -> Bool
+isHex32 t = Text.length t == 64 && all (`elem` Text.explode "0123456789abcdef") (Text.explode t)
+
+-- Validate before invoking the partial crypto builtins. They decode hex bytes;
+-- DA.Text.sha256 would hash the UTF-8 representation instead.
+hashPreimage : HashAlgorithm -> Text -> Optional Text
+hashPreimage algorithm preimage =
+  let normalized = Text.asciiToLower preimage
+  in if not (isHex32 normalized) then None else Some $ case algorithm of
+    Sha256 -> Crypto.sha256 normalized
+    Keccak256 -> Crypto.keccak256 normalized
+
+satisfied : Time -> [Party] -> Witness -> Guard -> Bool
+satisfied now actors witness = \case
+  Guard_Preimage algorithm digest -> any (\p -> hashPreimage algorithm p == Some digest) witness.preimages
+  Guard_After t -> now >= t
+  Guard_Before t -> now < t
+  Guard_Parties parties threshold -> length (filter (`elem` actors) (dedup parties)) >= threshold
+  Guard_All guards -> all (satisfied now actors witness) guards
+  Guard_Any guards -> any (satisfied now actors witness) guards
+
+validGuard : Int -> Guard -> Bool
+validGuard depth guard = depth <= 3 && case guard of
+  Guard_Preimage _ digest -> isHex32 digest
+  Guard_Parties parties threshold -> parties == dedup parties &&
+    threshold >= 1 && threshold <= length parties && length parties <= 8
+  Guard_All guards -> children guards
+  Guard_Any guards -> children guards
+  _ -> True
+  where children gs = not (null gs) && length gs <= 8 && all (validGuard (depth + 1)) gs
+
+validAccount : Account -> Bool
+validAccount account = isSome account.owner
+
+validLegs : Decimal -> [Leg] -> Bool
+validLegs amount legs = not (null legs) && length legs <= 8 &&
+  all (\l -> validAccount l.receiver && l.amount > 0.0) legs &&
+  sum (map (.amount) legs) <= amount
+
+validOutcome : Decimal -> Outcome -> Bool
+validOutcome _ Outcome_Unlock = True
+validOutcome amount (Outcome_Transfer legs) = validLegs amount legs
+validOutcome _ (Outcome_Distribute accounts) = not (null accounts) && length accounts <= 8 &&
+  dedup accounts == accounts && all validAccount accounts
+
+validateTerms : Party -> Time -> LockTerms -> Update ()
+validateTerms admin now terms = do
+  assertMsg "instrument admin must match factory" (terms.instrumentId.admin == admin)
+  assertMsg "owner must be a regular account" (validAccount terms.owner)
+  assertMsg "amount must be positive" (terms.amount > 0.0)
+  assertMsg "requestedAt must be in the past" (terms.requestedAt < now)
+  assertMsg "expiry must be in the future and within 365 days" $
+    terms.expiresAt >= now `addRelTime` seconds 1 && terms.expiresAt <= now `addRelTime` days 365
+  assertMsg "at most 8 rules" (length terms.rules <= 8)
+  let ids = map (.id) terms.rules
+  assertMsg "rule IDs must be nonempty and unique" (dedup ids == ids && all (/= "") ids)
+  forA_ terms.rules $ \r -> do
+    assertMsg "rule requires 1..8 unique enactors" $
+      not (null r.enactors) && length r.enactors <= 8 && dedup r.enactors == r.enactors
+    assertMsg "invalid or oversized guard" (validGuard 1 r.guard)
+    assertMsg "invalid rule outcome" (validOutcome terms.amount r.outcome)
+  assertMsg "invalid fallback" (validOutcome terms.amount terms.fallback)
+
+resolveOutcome : LockTerms -> Outcome -> Optional [Leg] -> Update [Leg]
+resolveOutcome terms outcome supplied = do
+  legs <- case outcome of
+    Outcome_Unlock -> do
+      assertMsg "legs only allowed for Distribute" (supplied == None)
+      pure [Leg terms.owner terms.amount]
+    Outcome_Transfer fixed -> do
+      assertMsg "legs only allowed for Distribute" (supplied == None)
+      pure fixed
+    Outcome_Distribute allowed -> do
+      ls <- optional (abort "Distribute requires legs") pure supplied
+      assertMsg "receiver outside agreed distribution set" (all (\l -> l.receiver `elem` allowed) ls)
+      pure ls
+  assertMsg "legs must be positive, bounded, and funded by the remainder" (validLegs terms.amount legs)
+  pure legs

@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-09-11T15:01:05.673054+00:00",
+  "source_verification": {
+    "checked_at": "2026-09-11T14:32:12.233188+00:00",
+    "splice_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+    "networks": {
+      "mainnet": {
+        "splice": "0.7.4",
+        "canton": "3.5.14",
+        "sdk": "3.5.2"
+      },
+      "testnet": {
+        "splice": "0.7.5",
+        "canton": "3.5.15",
+        "sdk": "3.5.2"
+      }
+    },
+    "artifacts": [
+      {
+        "file": "splice-api-token-holding-v1-1.0.0.dar",
+        "sha256": "ef75f8eb41a65810221784fdb78bb9dfac7cb22245aba14fa7cb7f69c34e0175",
+        "matches_pin": true
+      },
+      {
+        "file": "splice-api-token-holding-v2-1.0.0.dar",
+        "sha256": "f044b34d7a28c2b6c8a540af720297d55450a889b451dc4eed64a9914f1d6b00",
+        "matches_pin": true
+      },
+      {
+        "file": "splice-api-token-metadata-v1-1.0.0.dar",
+        "sha256": "455eb160cb5abd4ae9918a6fbb9dad471f721adda39f0e5c76feef08d05637fc",
+        "matches_pin": true
+      },
+      {
+        "file": "splice-api-token-transfer-events-v2-1.0.0.dar",
+        "sha256": "9a1ebe5aece0a7f1a49069fd7aba0ced92c4ae94e5e3d49cdb097733a87dddbc",
+        "matches_pin": true
+      },
+      {
+        "file": "splice-test-token-v2-1.0.1.dar",
+        "sha256": "1d6f5a296a6fedd18ff71dd29bfbf15b9f971303611d1ab49e5c08442fc37a57",
+        "matches_pin": true
+      },
+      {
+        "file": "splice-token-standard-utils-2.0.0.dar",
+        "sha256": "3346dedf1c4617e92858fe93d6f9c81ebb1a92a6d809378f487e516aa8f877fc",
+        "matches_pin": true
+      }
+    ],
+    "drift": []
+  },
+  "ide_ledger": {
+    "sdk": "3.5.2",
+    "java": "21.0.12.1",
+    "passed": 23
+  },
+  "evm": {
+    "forge": "1.3.6",
+    "solc": "0.8.24",
+    "shared_vectors": 6,
+    "passed": [
+      "test_sha256_bytes32_vectors",
+      "test_keccak256_bytes32_vectors"
+    ]
+  },
+  "runtimes": [
+    {
+      "checked_at": "2026-09-11T14:40:16.914884+00:00",
+      "network_runtime": "mainnet",
+      "execution": "local Canton OSS, single participant and synchronizer, static time, real Ledger API",
+      "splice_version_reference": "0.7.4",
+      "canton_version_observed": "3.5.14",
+      "sdk": "3.5.2",
+      "lf": "2.1",
+      "splice_source_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+      "artifacts": [
+        {
+          "package": "splice-api-token-conditional-lock-v1",
+          "package_id": "9e362fc605d36864ee08d69ef95db6937ab8f920419874f37951cc3a40105c30",
+          "dar_sha256": "dae3a99d0c36da263297f5a785afd7f14af003482ce705d1fa4ccb58b7612a97"
+        },
+        {
+          "package": "conditional-lock-test-token",
+          "package_id": "835b9dbe48f386029b327a460a29f0d176fafb768ba93d6f1d8ea3ec94f1835f",
+          "dar_sha256": "da74016a6a8facbc252ca350c20042f1103eb2ea13dd16f0290148d97fdf214b"
+        },
+        {
+          "package": "conditional-lock-test",
+          "package_id": "3cb69d5b733d6f0024d82479ad8d1d3e3120c08be1a242819ddfaa92a8f6f7c8",
+          "dar_sha256": "eea462a64812defd1d06d7825851f0718c1f4a53277e9b2c8166fcad5dc80758"
+        }
+      ],
+      "passed": [
+        "TestConditionalLock:test_amendCannotChangeAssetOrResurrectSpentRules",
+        "TestConditionalLock:test_amendTopUpAndNewReceiverAcceptance",
+        "TestConditionalLock:test_atomicDvpAcrossTwoTestTokenV2Registries",
+        "TestConditionalLock:test_atomicDvpRollsBackFirstEnactWhenSecondFails",
+        "TestConditionalLock:test_cancelRequiresEveryNamedParty",
+        "TestConditionalLock:test_distributeIsBoundedToReceiversAndRemainingAmount",
+        "TestConditionalLock:test_enactorAndThresholdCannotBeSpoofed",
+        "TestConditionalLock:test_expiryBoundaryAndOwnerOnlyRefund",
+        "TestConditionalLock:test_keccakWitnessIsNormalizedAndCannotSubstituteSha256",
+        "TestConditionalLock:test_malformedTermsAndFundingFailWithoutConsumingInputs",
+        "TestConditionalLock:test_multipleReceiversAcceptInSeparateTransactions",
+        "TestConditionalLock:test_nestedGuardsUseInclusiveAfterAndExclusiveBefore",
+        "TestConditionalLock:test_oneStepBothActorsAndOwnerChange",
+        "TestConditionalLock:test_partialFallbackCannotBeBypassedBySpendingExpiredBacking",
+        "TestConditionalLock:test_partialReleaseConsumesRuleAndConservesFunds",
+        "TestConditionalLock:test_pendingInstructionCannotPinFundsAfterExpiry",
+        "TestConditionalLock:test_receiverAuthorityPersistsAndOwnerDoesNotEnact",
+        "TestConditionalLock:test_receiverProviderAuthorityIsCapturedAtAcceptance",
+        "TestConditionalLock:test_rejectReturnsOriginalOwnerFunds",
+        "TestConditionalLock:test_unlockRuleRequiresNoReceiverAcceptance",
+        "TestConditionalLock:test_v2EventsDescribeBothSidesWithUniqueLegIds",
+        "TestHashVectors:test_hashVectorsMatchEvm",
+        "TestHashVectors:test_invalidPreimagesAreRejectedBeforeHashing"
+      ]
+    },
+    {
+      "checked_at": "2026-09-11T14:41:42.717204+00:00",
+      "network_runtime": "testnet",
+      "execution": "local Canton OSS, single participant and synchronizer, static time, real Ledger API",
+      "splice_version_reference": "0.7.5",
+      "canton_version_observed": "3.5.15",
+      "sdk": "3.5.2",
+      "lf": "2.1",
+      "splice_source_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+      "artifacts": [
+        {
+          "package": "splice-api-token-conditional-lock-v1",
+          "package_id": "9e362fc605d36864ee08d69ef95db6937ab8f920419874f37951cc3a40105c30",
+          "dar_sha256": "dae3a99d0c36da263297f5a785afd7f14af003482ce705d1fa4ccb58b7612a97"
+        },
+        {
+          "package": "conditional-lock-test-token",
+          "package_id": "835b9dbe48f386029b327a460a29f0d176fafb768ba93d6f1d8ea3ec94f1835f",
+          "dar_sha256": "da74016a6a8facbc252ca350c20042f1103eb2ea13dd16f0290148d97fdf214b"
+        },
+        {
+          "package": "conditional-lock-test",
+          "package_id": "3cb69d5b733d6f0024d82479ad8d1d3e3120c08be1a242819ddfaa92a8f6f7c8",
+          "dar_sha256": "eea462a64812defd1d06d7825851f0718c1f4a53277e9b2c8166fcad5dc80758"
+        }
+      ],
+      "passed": [
+        "TestConditionalLock:test_amendCannotChangeAssetOrResurrectSpentRules",
+        "TestConditionalLock:test_amendTopUpAndNewReceiverAcceptance",
+        "TestConditionalLock:test_atomicDvpAcrossTwoTestTokenV2Registries",
+        "TestConditionalLock:test_atomicDvpRollsBackFirstEnactWhenSecondFails",
+        "TestConditionalLock:test_cancelRequiresEveryNamedParty",
+        "TestConditionalLock:test_distributeIsBoundedToReceiversAndRemainingAmount",
+        "TestConditionalLock:test_enactorAndThresholdCannotBeSpoofed",
+        "TestConditionalLock:test_expiryBoundaryAndOwnerOnlyRefund",
+        "TestConditionalLock:test_keccakWitnessIsNormalizedAndCannotSubstituteSha256",
+        "TestConditionalLock:test_malformedTermsAndFundingFailWithoutConsumingInputs",
+        "TestConditionalLock:test_multipleReceiversAcceptInSeparateTransactions",
+        "TestConditionalLock:test_nestedGuardsUseInclusiveAfterAndExclusiveBefore",
+        "TestConditionalLock:test_oneStepBothActorsAndOwnerChange",
+        "TestConditionalLock:test_partialFallbackCannotBeBypassedBySpendingExpiredBacking",
+        "TestConditionalLock:test_partialReleaseConsumesRuleAndConservesFunds",
+        "TestConditionalLock:test_pendingInstructionCannotPinFundsAfterExpiry",
+        "TestConditionalLock:test_receiverAuthorityPersistsAndOwnerDoesNotEnact",
+        "TestConditionalLock:test_receiverProviderAuthorityIsCapturedAtAcceptance",
+        "TestConditionalLock:test_rejectReturnsOriginalOwnerFunds",
+        "TestConditionalLock:test_unlockRuleRequiresNoReceiverAcceptance",
+        "TestConditionalLock:test_v2EventsDescribeBothSidesWithUniqueLegIds",
+        "TestHashVectors:test_hashVectorsMatchEvm",
+        "TestHashVectors:test_invalidPreimagesAreRejectedBeforeHashing"
+      ]
+    }
+  ],
+  "solana": {
+    "checked_at": "2026-09-11T15:01:05.673054+00:00",
+    "execution": "local LiteSVM, compiled SBF program, signed transactions, no RPC or public-cluster deployment",
+    "agave_cli": "3.1.14",
+    "agave_runtime_dependencies": "3.1.14",
+    "litesvm": "0.9.1",
+    "solana_program_crate": "3.0.0",
+    "host_rust": "1.89.0",
+    "sbf_platform_tools": "v1.52",
+    "sbf_arch": "v0",
+    "shared_vectors": 6,
+    "hash_algorithms": [
+      "sha256",
+      "keccak256"
+    ],
+    "passed": [
+      "hash_syscalls_match_shared_daml_and_evm_vectors",
+      "rejects_hex_text_instead_of_raw_bytes",
+      "rejects_wrong_preimage_lengths"
+    ],
+    "sbf_program_sha256": "c1a9ccc4e2b0443c046a761efaf5c334e9b22dd82f05b2e2b5cf6d806f6325ca",
+    "cargo_lock_sha256": "4f08b02d84e0c9475dfb1f2dd8f111da6e49c71a68389269ebfafc26a6797a43",
+    "fixture_sha256": "d15dfa7a36483a165d6802dc170c27ce3103b5817608b64fcc8f98ad8360f79d",
+    "hash_syscall_imports_verified": [
+      "sol_sha256",
+      "sol_keccak256"
+    ]
+  }
+}

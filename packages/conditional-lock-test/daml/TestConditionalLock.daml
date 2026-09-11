@@ -1,0 +1,539 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestConditionalLock where
+
+import DA.Assert
+import DA.Foldable (forA_)
+import DA.Optional (fromSome)
+import DA.TextMap qualified as TextMap
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1 qualified as V1
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.TransferEventsV2 qualified as Events
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 qualified as Token
+import ConditionalLock.Policy
+import ConditionalLock.TestToken qualified as Impl
+
+data Env = Env with
+  alice : Party
+  bob : Party
+  charlie : Party
+  arbiter : Party
+  provider : Party
+  adminA : Party
+  adminB : Party
+  rulesA : ContractId Token.TokenRules
+  rulesB : ContractId Token.TokenRules
+  now : Time
+
+setup : () -> Script Env
+setup () = do
+  alice <- allocateParty "cl-alice"
+  bob <- allocateParty "cl-bob"
+  charlie <- allocateParty "cl-charlie"
+  arbiter <- allocateParty "cl-arbiter"
+  provider <- allocateParty "cl-provider"
+  adminA <- allocateParty "cl-admin-a"
+  adminB <- allocateParty "cl-admin-b"
+  rulesA <- submit adminA $ createCmd (Token.TokenRules adminA)
+  rulesB <- submit adminB $ createCmd (Token.TokenRules adminB)
+  now <- getTime
+  pure Env with alice; bob; charlie; arbiter; provider; adminA; adminB; rulesA; rulesB; now
+
+account : Party -> V2.Account
+account party = V2.Account (Some party) None ""
+
+extra : ExtraArgs
+extra = ExtraArgs emptyChoiceContext emptyMetadata
+
+noWitness : CL.Witness
+noWitness = CL.Witness []
+
+zero : Text
+zero = "0000000000000000000000000000000000000000000000000000000000000000"
+
+zeroSha : Text
+zeroSha = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+
+termsFor : Env -> CL.LockTerms
+termsFor e = CL.LockTerms with
+  owner = account e.alice
+  instrumentId = V2.InstrumentId e.adminA "X"
+  amount = 100.0
+  rules = [CL.Rule "release" [e.arbiter] (CL.Guard_Parties [e.arbiter] 1)
+    (CL.Outcome_Transfer [CL.Leg (account e.bob) 100.0])]
+  expiresAt = e.now `addRelTime` days 1
+  fallback = CL.Outcome_Unlock
+  requestedAt = e.now `addRelTime` seconds (-1)
+  meta = emptyMetadata
+
+mint : CL.LockTerms -> Decimal -> Script (ContractId V2.Holding)
+mint terms amount = do
+  cid <- submit (actAs (terms.instrumentId.admin :: accountParties terms.owner)) $
+    createCmd $ Token.Token $ V2.HoldingView terms.owner terms.instrumentId amount None emptyMetadata
+  pure (toInterfaceContractId cid)
+
+factory : ContractId Token.TokenRules -> CL.LockTerms -> Text -> Script (ContractId CL.ConditionalLockFactory)
+factory rules terms lockId = do
+  cid <- submit terms.instrumentId.admin $ createCmd (Impl.Factory terms.instrumentId.admin rules lockId)
+  pure (toInterfaceContractId cid)
+
+lock : ContractId Token.TokenRules -> CL.LockTerms -> [Party] -> Script CL.ConditionalLockResult
+lock rules terms actors = do
+  input <- mint terms terms.amount
+  f <- factory rules terms "proof-lock"
+  submit (actAs actors <> readAs [terms.instrumentId.admin]) $ exerciseCmd f $ CL.ConditionalLockFactory_Lock terms [input] actors extra
+
+asLocked : CL.ConditionalLockResult -> Script (ContractId CL.ConditionalLock, ContractId V2.Holding)
+asLocked result = case result.output of
+  CL.ConditionalLockResult_Locked cid holding _ -> pure (cid, holding)
+  _ -> abort "expected Locked"
+
+asPending : CL.ConditionalLockResult -> Script (ContractId CL.ConditionalLockInstruction)
+asPending result = case result.output of
+  CL.ConditionalLockResult_Pending cid -> pure cid
+  _ -> abort "expected Pending"
+
+enactArg : Text -> [Party] -> CL.ConditionalLock_Enact
+enactArg id actors = CL.ConditionalLock_Enact id actors noWitness None extra
+
+assertToken : Party -> ContractId V2.Holding -> V2.Account -> V2.InstrumentId -> Decimal -> Script ()
+assertToken party cid owner instrument amount = do
+  Some token <- queryContractId party (coerceContractId cid : ContractId Token.Token)
+  token.holding.account === owner
+  token.holding.instrumentId === instrument
+  token.holding.amount === amount
+  token.holding.lock === None
+
+assertConsumed : Party -> ContractId CL.ConditionalLock -> ContractId V2.Holding -> Script ()
+assertConsumed party cid holding = do
+  queryContractId party (coerceContractId cid : ContractId Impl.ActiveLock) >>= (=== None)
+  queryContractId party (coerceContractId holding : ContractId Impl.LockedHolding) >>= (=== None)
+
+test_receiverAuthorityPersistsAndOwnerDoesNotEnact : Script ()
+test_receiverAuthorityPersistsAndOwnerDoesNotEnact = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter]
+          (CL.Guard_Preimage CL.Sha256 zeroSha) (CL.Outcome_Transfer [CL.Leg (account e.bob) 100.0])]
+  instruction <- lock e.rulesA terms [e.alice] >>= asPending
+  -- An observer's disclosure/readAs is not an acceptance signature.
+  submitMustFail (actAs [e.charlie] <> readAs [e.adminA, e.bob]) $ exerciseCmd instruction $
+    CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+  accepted <- submit e.bob $ exerciseCmd instruction $
+    CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+  (cid, holding) <- asLocked accepted
+  -- Neither owner, receiver, nor registry admin submits this transaction.
+  result <- submit e.arbiter $ exerciseCmd cid $ (enactArg "release" [e.arbiter]) with witness = CL.Witness [zero]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected full transfer"
+  assertConsumed e.alice cid holding
+  submitMustFail e.arbiter $ exerciseCmd cid $ (enactArg "release" [e.arbiter]) with witness = CL.Witness [zero]
+
+test_oneStepBothActorsAndOwnerChange : Script ()
+test_oneStepBothActorsAndOwnerChange = do
+  e <- setup ()
+  let terms = termsFor e
+  input <- mint terms 125.0
+  f <- factory e.rulesA terms "one-step"
+  result <- submit (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock terms [input] [e.alice, e.bob] extra
+  case result.output of
+    CL.ConditionalLockResult_Locked _ holding [change] -> do
+      assertToken e.alice change terms.owner terms.instrumentId 25.0
+      Some view <- queryInterfaceContractId e.alice holding
+      view.account === terms.owner
+      view.amount === 100.0
+      (fromSome view.lock).holders === namedParties terms
+      (fromSome view.lock).expiresAt === Some terms.expiresAt
+      (fromSome view.lock).expiresAfter === None
+      -- Existing V1 wallets can also view the same locked holding.
+      Some oldView <- queryInterfaceContractId e.alice (coerceContractId holding : ContractId V1.Holding)
+      oldView.amount === view.amount
+      assert (oldView.lock /= None)
+    _ -> abort "expected one-step lock and owner change"
+  queryContractId e.alice (coerceContractId input : ContractId Token.Token) >>= (=== None)
+  query @Impl.Instruction e.alice >>= (=== [])
+
+-- Exactly two top-level Enact exercises in one Ledger API submission. Each
+-- instrument has its own TestTokenV2 TokenRules contract and registry admin.
+test_atomicDvpAcrossTwoTestTokenV2Registries : Script ()
+test_atomicDvpAcrossTwoTestTokenV2Registries = do
+  e <- setup ()
+  let actors = [e.alice, e.bob]
+  let policyGuard = CL.Guard_Parties actors 2
+  let x = (termsFor e) with
+        rules = [CL.Rule "dvp" actors policyGuard (CL.Outcome_Transfer [CL.Leg (account e.bob) 100.0])]
+  let y = x with
+        owner = account e.bob
+        instrumentId = V2.InstrumentId e.adminB "Y"
+        amount = 40.0
+        rules = [CL.Rule "dvp" actors policyGuard (CL.Outcome_Transfer [CL.Leg (account e.alice) 40.0])]
+  (xCid, xHolding) <- lock e.rulesA x actors >>= asLocked
+  (yCid, yHolding) <- lock e.rulesB y actors >>= asLocked
+  tree <- submitTree (actAs actors <> readAs [e.adminA, e.adminB]) $
+    exerciseCmd xCid (enactArg "dvp" actors) *>
+    exerciseCmd yCid (enactArg "dvp" actors)
+  length tree.rootEvents === 2
+  assertConsumed e.alice xCid xHolding
+  assertConsumed e.bob yCid yHolding
+  bobTokens <- query @Token.Token e.bob
+  aliceTokens <- query @Token.Token e.alice
+  sum [ t.holding.amount | (_, t) <- bobTokens, t.holding.account == account e.bob, t.holding.instrumentId == x.instrumentId ] === 100.0
+  sum [ t.holding.amount | (_, t) <- aliceTokens, t.holding.account == account e.alice, t.holding.instrumentId == y.instrumentId ] === 40.0
+
+test_atomicDvpRollsBackFirstEnactWhenSecondFails : Script ()
+test_atomicDvpRollsBackFirstEnactWhenSecondFails = do
+  e <- setup ()
+  let actors = [e.alice, e.bob]
+  let policyGuard = CL.Guard_Parties actors 2
+  let x = (termsFor e) with
+        rules = [CL.Rule "dvp" actors policyGuard (CL.Outcome_Transfer [CL.Leg (account e.bob) 100.0])]
+  let y = x with
+        owner = account e.bob
+        instrumentId = V2.InstrumentId e.adminB "Y"
+        rules = [CL.Rule "dvp" actors (CL.Guard_Preimage CL.Sha256 zeroSha) (CL.Outcome_Transfer [CL.Leg (account e.alice) 100.0])]
+  (xCid, xHolding) <- lock e.rulesA x actors >>= asLocked
+  (yCid, yHolding) <- lock e.rulesB y actors >>= asLocked
+  submitMustFail (actAs actors <> readAs [e.adminA, e.adminB]) $
+    exerciseCmd xCid (enactArg "dvp" actors) *>
+    exerciseCmd yCid (enactArg "dvp" actors)
+  Some _ <- queryInterfaceContractId e.alice xCid
+  Some _ <- queryInterfaceContractId e.bob yCid
+  Some _ <- queryInterfaceContractId e.alice xHolding
+  Some _ <- queryInterfaceContractId e.bob yHolding
+  query @Token.Token e.alice >>= (=== [])
+  query @Token.Token e.bob >>= (=== [])
+  -- The same first leg is still usable after the rejected atomic submission.
+  _ <- submit (actAs actors <> readAs [e.adminA, e.adminB]) $
+    exerciseCmd xCid (enactArg "dvp" actors) *>
+    exerciseCmd yCid ((enactArg "dvp" actors) with witness = CL.Witness [zero])
+  assertConsumed e.alice xCid xHolding
+  assertConsumed e.bob yCid yHolding
+
+test_enactorAndThresholdCannotBeSpoofed : Script ()
+test_enactorAndThresholdCannotBeSpoofed = do
+  e <- setup ()
+  let actors = [e.alice, e.bob]
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" actors
+          (CL.Guard_Parties actors 2) (CL.Outcome_Transfer [CL.Leg (account e.bob) 100.0])]
+  (cid, _) <- lock e.rulesA terms actors >>= asLocked
+  submitMustFail e.bob $ exerciseCmd cid $ enactArg "release" [e.bob, e.bob]
+  submitMustFail (actAs [e.bob] <> readAs [e.alice]) $ exerciseCmd cid $ enactArg "release" actors
+  submitMustFail (actAs [e.charlie] <> readAs actors) $ exerciseCmd cid $ enactArg "release" [e.charlie]
+  _ <- submit (actAs actors) $ exerciseCmd cid $ enactArg "release" actors
+  pure ()
+
+test_receiverProviderAuthorityIsCapturedAtAcceptance : Script ()
+test_receiverProviderAuthorityIsCapturedAtAcceptance = do
+  e <- setup ()
+  let receiver = (account e.bob) with provider = Some e.provider
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter]
+          (CL.Guard_Parties [e.arbiter] 1) (CL.Outcome_Transfer [CL.Leg receiver 100.0])]
+  instruction <- lock e.rulesA terms [e.alice] >>= asPending
+  submitMustFail e.bob $ exerciseCmd instruction $ CL.ConditionalLockInstruction_Accept receiver [e.bob] extra
+  result <- submit (actAs [e.bob, e.provider]) $ exerciseCmd instruction $
+    CL.ConditionalLockInstruction_Accept receiver [e.bob, e.provider] extra
+  (cid, _) <- asLocked result
+  enacted <- submit e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  case enacted.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.provider out receiver terms.instrumentId 100.0
+    _ -> abort "expected provider-authorized receiver holding"
+
+test_multipleReceiversAcceptInSeparateTransactions : Script ()
+test_multipleReceiversAcceptInSeparateTransactions = do
+  e <- setup ()
+  let legs = [CL.Leg (account e.bob) 60.0, CL.Leg (account e.charlie) 40.0]
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter]
+          (CL.Guard_Parties [e.arbiter] 1) (CL.Outcome_Transfer legs)]
+  initial <- lock e.rulesA terms [e.alice] >>= asPending
+  second <- submit e.bob (exerciseCmd initial (CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra)) >>= asPending
+  Some view <- queryInterfaceContractId e.charlie second
+  view.pendingReceivers === [account e.charlie]
+  submitMustFail e.bob $ exerciseCmd second $ CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+  result <- submit e.charlie $ exerciseCmd second $ CL.ConditionalLockInstruction_Accept (account e.charlie) [e.charlie] extra
+  (cid, _) <- asLocked result
+  enacted <- submit e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  case enacted.output of
+    CL.ConditionalLockResult_Enacted [b, c] [] None -> do
+      assertToken e.bob b (account e.bob) terms.instrumentId 60.0
+      assertToken e.charlie c (account e.charlie) terms.instrumentId 40.0
+    _ -> abort "expected both accepted receivers to receive funds"
+
+test_partialReleaseConsumesRuleAndConservesFunds : Script ()
+test_partialReleaseConsumesRuleAndConservesFunds = do
+  e <- setup ()
+  let tranche id amount = CL.Rule id [e.arbiter] (CL.Guard_After e.now) (CL.Outcome_Transfer [CL.Leg (account e.bob) amount])
+  let terms = (termsFor e) with rules = [tranche "first" 30.0, tranche "second" 70.0, tranche "too-large-now" 100.0]
+  (cid, holding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  first <- submit e.arbiter $ exerciseCmd cid $ enactArg "first" [e.arbiter]
+  case first.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some next) -> do
+      assertToken e.bob out (account e.bob) terms.instrumentId 30.0
+      assertConsumed e.alice cid holding
+      Some view <- queryInterfaceContractId e.alice next
+      view.lockId === "proof-lock"
+      view.terms.amount === 70.0
+      map (.id) view.terms.rules === ["second", "too-large-now"]
+      submitMustFail e.arbiter $ exerciseCmd next $ enactArg "first" [e.arbiter]
+      submitMustFail e.arbiter $ exerciseCmd next $ enactArg "too-large-now" [e.arbiter]
+      last <- submit e.arbiter $ exerciseCmd next $ enactArg "second" [e.arbiter]
+      case last.output of
+        CL.ConditionalLockResult_Enacted [rest] [] None -> assertToken e.bob rest (account e.bob) terms.instrumentId 70.0
+        _ -> abort "expected terminal second tranche"
+    _ -> abort "expected partial release"
+
+test_distributeIsBoundedToReceiversAndRemainingAmount : Script ()
+test_distributeIsBoundedToReceiversAndRemainingAmount = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (CL.Guard_Parties [e.arbiter] 1)
+          (CL.Outcome_Distribute [account e.alice, account e.bob])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  let arg = enactArg "award" [e.arbiter]
+  forA_ [None, Some [], Some [CL.Leg (account e.charlie) 100.0], Some [CL.Leg (account e.bob) 101.0], Some [CL.Leg (account e.bob) 0.0]] $ \legs ->
+    submitMustFail e.arbiter $ exerciseCmd cid $ arg with legs
+  result <- submit e.arbiter $ exerciseCmd cid $ arg with legs = Some [CL.Leg (account e.alice) 35.0, CL.Leg (account e.bob) 65.0]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [b] [a] None -> do
+      assertToken e.alice a (account e.alice) terms.instrumentId 35.0
+      assertToken e.bob b (account e.bob) terms.instrumentId 65.0
+    _ -> abort "expected bounded escrow award"
+
+test_expiryBoundaryAndOwnerOnlyRefund : Script ()
+test_expiryBoundaryAndOwnerOnlyRefund = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  submitMustFail e.alice $ exerciseCmd cid $ CL.ConditionalLock_Expire [e.alice] None extra
+  setTime terms.expiresAt
+  submitMustFail e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  submitMustFail e.bob $ exerciseCmd cid $ CL.ConditionalLock_Expire [e.bob] None extra
+  result <- submit e.alice $ exerciseCmd cid $ CL.ConditionalLock_Expire [e.alice] None extra
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.owner terms.instrumentId 100.0
+    _ -> abort "expected owner refund at exact expiry"
+
+test_pendingInstructionCannotPinFundsAfterExpiry : Script ()
+test_pendingInstructionCannotPinFundsAfterExpiry = do
+  e <- setup ()
+  let terms = termsFor e
+  cid <- lock e.rulesA terms [e.alice] >>= asPending
+  setTime terms.expiresAt
+  submitMustFail e.bob $ exerciseCmd cid $ CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+  result <- submit e.alice $ exerciseCmd cid $ CL.ConditionalLockInstruction_Withdraw [e.alice] extra
+  result.output === CL.ConditionalLockResult_Failed
+  [(out, _)] <- query @Token.Token e.alice
+  assertToken e.alice (toInterfaceContractId out) terms.owner terms.instrumentId 100.0
+  query @Impl.LockedHolding e.alice >>= (=== [])
+
+test_cancelRequiresEveryNamedParty : Script ()
+test_cancelRequiresEveryNamedParty = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  submitMustFail (actAs [e.alice, e.bob]) $ exerciseCmd cid $ CL.ConditionalLock_Cancel [e.alice, e.bob] extra
+  -- The expired-lock rules explicitly allow unanimous cancellation.
+  setTime terms.expiresAt
+  let actors = [e.alice, e.bob, e.arbiter]
+  result <- submit (actAs actors) $ exerciseCmd cid $ CL.ConditionalLock_Cancel actors extra
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.owner terms.instrumentId 100.0
+    _ -> abort "expected unanimous cancellation"
+
+test_amendTopUpAndNewReceiverAcceptance : Script ()
+test_amendTopUpAndNewReceiverAcceptance = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, oldHolding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  topUp <- mint terms 20.0
+  let newTerms = terms with
+        amount = 120.0
+        rules = [CL.Rule "new-release" [e.arbiter]
+          (CL.Guard_Parties [e.arbiter] 1) (CL.Outcome_Transfer [CL.Leg (account e.charlie) 120.0])]
+  let actors = [e.alice, e.bob, e.arbiter]
+  submitMustFail (actAs [e.alice, e.arbiter]) $ exerciseCmd cid $
+    CL.ConditionalLock_Amend newTerms [topUp] [e.alice, e.arbiter] extra
+  amended <- submit (actAs actors) $ exerciseCmd cid $ CL.ConditionalLock_Amend newTerms [topUp] actors extra
+  assertConsumed e.alice cid oldHolding
+  pendingCid <- asPending amended
+  accepted <- submit e.charlie $ exerciseCmd pendingCid $ CL.ConditionalLockInstruction_Accept (account e.charlie) [e.charlie] extra
+  (next, _) <- asLocked accepted
+  Some view <- queryInterfaceContractId e.alice next
+  view.lockId === "proof-lock"
+  result <- submit e.arbiter $ exerciseCmd next $ enactArg "new-release" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.charlie out (account e.charlie) terms.instrumentId 120.0
+    _ -> abort "expected amended transfer"
+
+test_rejectReturnsOriginalOwnerFunds : Script ()
+test_rejectReturnsOriginalOwnerFunds = do
+  e <- setup ()
+  let terms = termsFor e
+  cid <- lock e.rulesA terms [e.alice] >>= asPending
+  result <- submit e.bob $ exerciseCmd cid $ CL.ConditionalLockInstruction_Reject (account e.bob) [e.bob] extra
+  result.output === CL.ConditionalLockResult_Failed
+  [(out, _)] <- query @Token.Token e.alice
+  assertToken e.alice (toInterfaceContractId out) terms.owner terms.instrumentId 100.0
+
+test_malformedTermsAndFundingFailWithoutConsumingInputs : Script ()
+test_malformedTermsAndFundingFailWithoutConsumingInputs = do
+  e <- setup ()
+  let terms = termsFor e
+  input <- mint terms 100.0
+  f <- factory e.rulesA terms "validation"
+  let bad =
+        [ (terms with amount = 0.0)
+        , (terms with requestedAt = e.now)
+        , (terms with expiresAt = e.now)
+        , (terms with rules = terms.rules <> terms.rules)
+        , (terms with rules = [CL.Rule "bad" [] (CL.Guard_All []) CL.Outcome_Unlock])
+        , (terms with fallback = CL.Outcome_Distribute [])
+        , (terms with fallback = CL.Outcome_Transfer [CL.Leg (account e.bob) (-1.0)])
+        , (terms with owner = account e.bob)
+        , (terms with instrumentId = V2.InstrumentId e.adminB "X") ]
+  forA_ bad $ \t -> submitMustFail (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock t [input] [e.alice, e.bob] extra
+  submitMustFail (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock terms [input, input] [e.alice, e.bob] extra
+  assertToken e.alice input terms.owner terms.instrumentId 100.0
+
+test_nestedGuardsUseInclusiveAfterAndExclusiveBefore : Script ()
+test_nestedGuardsUseInclusiveAfterAndExclusiveBefore = do
+  e <- setup ()
+  let policyGuard = CL.Guard_All [CL.Guard_After e.now,
+        CL.Guard_Any [CL.Guard_Before e.now, CL.Guard_Parties [e.arbiter] 1]]
+  assert (validGuard 1 policyGuard)
+  satisfied e.now [e.arbiter] noWitness policyGuard === True
+  satisfied e.now [] noWitness policyGuard === False
+  satisfied (e.now `addRelTime` seconds (-1)) [e.arbiter] noWitness policyGuard === False
+  validGuard 1 (CL.Guard_All [CL.Guard_All [CL.Guard_All [CL.Guard_After e.now]]]) === False
+  validGuard 1 (CL.Guard_Parties [e.alice, e.alice] 2) === False
+  validGuard 1 (CL.Guard_Parties [e.alice] 0) === False
+
+test_partialFallbackCannotBeBypassedBySpendingExpiredBacking : Script ()
+test_partialFallbackCannotBeBypassedBySpendingExpiredBacking = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = []
+        fallback = CL.Outcome_Transfer [CL.Leg (account e.bob) 50.0]
+  (cid, holding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  setTime terms.expiresAt
+  let relockTerms = terms with
+        requestedAt = terms.expiresAt `addRelTime` seconds (-1)
+        expiresAt = terms.expiresAt `addRelTime` days 1
+  f <- factory e.rulesA relockTerms "attempted-relock"
+  -- Uses TestTokenV2.fetchAndArchiveUnlockedToken, the ordinary token spending
+  -- path. An expired conditional backing must not be mistaken for an input.
+  submitMustFail (actAs [e.alice, e.bob] <> readAs e.adminA) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock relockTerms [holding] [e.alice, e.bob] extra
+  first <- submit e.alice $ exerciseCmd cid $ CL.ConditionalLock_Expire [e.alice] None extra
+  case first.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some next) -> do
+      assertToken e.bob out (account e.bob) terms.instrumentId 50.0
+      Some view <- queryInterfaceContractId e.alice next
+      view.terms.rules === []
+      view.terms.amount === 50.0
+      let allActors = [e.alice, e.bob]
+      submitMustFail allActors $ exerciseCmd next $ CL.ConditionalLock_Amend relockTerms [] allActors extra
+      second <- submit e.alice $ exerciseCmd next $ CL.ConditionalLock_Expire [e.alice] None extra
+      case second.output of
+        CL.ConditionalLockResult_Enacted [rest] [] None -> assertToken e.bob rest (account e.bob) terms.instrumentId 50.0
+        _ -> abort "expected terminal fallback"
+    _ -> abort "expected partial fallback continuation"
+
+test_amendCannotChangeAssetOrResurrectSpentRules : Script ()
+test_amendCannotChangeAssetOrResurrectSpentRules = do
+  e <- setup ()
+  let rule id amount = CL.Rule id [e.arbiter] (CL.Guard_Parties [e.arbiter] 1)
+        (CL.Outcome_Transfer [CL.Leg (account e.bob) amount])
+  let terms = (termsFor e) with rules = [rule "first" 30.0, rule "second" 70.0]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  first <- submit e.arbiter $ exerciseCmd cid $ enactArg "first" [e.arbiter]
+  case first.output of
+    CL.ConditionalLockResult_Enacted _ _ (Some next) -> do
+      topUp <- mint terms 20.0
+      let amended = terms with amount = 90.0; rules = [rule "replacement" 90.0]
+      let actors = [e.alice, e.bob, e.arbiter]
+      forA_ [ (amended with owner = account e.charlie)
+            , (amended with instrumentId = V2.InstrumentId e.adminA "OTHER")
+            , (amended with amount = 100.0)
+            , (amended with rules = [rule "first" 90.0]) ] $ \bad ->
+        submitMustFail actors $ exerciseCmd next $ CL.ConditionalLock_Amend bad [topUp] actors extra
+      assertToken e.alice topUp terms.owner terms.instrumentId 20.0
+      result <- submit actors $ exerciseCmd next $ CL.ConditionalLock_Amend amended [topUp] actors extra
+      (final, _) <- asLocked result
+      last <- submit e.arbiter $ exerciseCmd final $ enactArg "replacement" [e.arbiter]
+      case last.output of
+        CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 90.0
+        _ -> abort "expected conserved amended remainder"
+    _ -> abort "expected partial release before amendment"
+
+test_unlockRuleRequiresNoReceiverAcceptance : Script ()
+test_unlockRuleRequiresNoReceiverAcceptance = do
+  e <- setup ()
+  let terms = (termsFor e) with rules = [CL.Rule "unlock" [e.arbiter] (CL.Guard_After e.now) CL.Outcome_Unlock]
+  (cid, _) <- lock e.rulesA terms [e.alice] >>= asLocked
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "unlock" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.owner terms.instrumentId 100.0
+    _ -> abort "expected enactor-authorized owner unlock"
+
+test_keccakWitnessIsNormalizedAndCannotSubstituteSha256 : Script ()
+test_keccakWitnessIsNormalizedAndCannotSubstituteSha256 = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.bob]
+          (CL.Guard_Preimage CL.Keccak256 "a9c584056064687e149968cbab758a3376d22aedc6a55823d1b3ecbee81b8fb9")
+          (CL.Outcome_Transfer [CL.Leg (account e.bob) 100.0])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  forA_ [[], [zero], ["0x" <> zero], ["not hex"]] $ \preimages ->
+    submitMustFail e.bob $ exerciseCmd cid $ (enactArg "release" [e.bob]) with witness = CL.Witness preimages
+  let uppercase = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+  result <- submit e.bob $ exerciseCmd cid $ (enactArg "release" [e.bob]) with witness = CL.Witness [uppercase]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected byte-domain Keccak release"
+
+holdingsChanges : [TreeEvent] -> [Events.EventLog_HoldingsChange]
+holdingsChanges = concatMap $ \case
+  CreatedEvent _ -> []
+  ExercisedEvent event ->
+    optional [] pure (fromAnyChoice @Events.EventLog event.argument) <> holdingsChanges event.childEvents
+
+test_v2EventsDescribeBothSidesWithUniqueLegIds : Script ()
+test_v2EventsDescribeBothSidesWithUniqueLegIds = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (CL.Guard_Parties [e.arbiter] 1)
+          (CL.Outcome_Transfer [CL.Leg (account e.bob) 60.0, CL.Leg (account e.bob) 40.0])]
+  (cid, holding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  tree <- submitTree e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  case holdingsChanges tree.rootEvents of
+    [sent, received] -> do
+      sent.admin === e.adminA
+      sent.account === terms.owner
+      sent.inputHoldingCids === [holding]
+      sent.outputHoldingCids === []
+      received.account === account e.bob
+      received.inputHoldingCids === []
+      length received.outputHoldingCids === 2
+      let outgoing = sent.transferLegSides
+      let incoming = received.transferLegSides
+      map (.transferLegId) outgoing === map (.transferLegId) incoming
+      map (.amount) outgoing === [60.0, 40.0]
+      map (.side) outgoing === [Events.SenderSide, Events.SenderSide]
+      map (.side) incoming === [Events.ReceiverSide, Events.ReceiverSide]
+      case outgoing of
+        [first, second] -> assert (first.transferLegId /= second.transferLegId)
+        _ -> abort "expected two distinct transfer legs"
+      TextMap.lookup (prefix <> "tx-kind") received.extraArgs.meta.values === Some "transfer"
+      TextMap.lookup (prefix <> "conditional-lock/rule-id") received.extraArgs.meta.values === Some "release"
+    _ -> abort "expected one sender event and one receiver event"

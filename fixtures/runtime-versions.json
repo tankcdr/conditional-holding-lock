@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-09-11",
+  "mainnet": {
+    "splice": "0.7.4",
+    "canton": "3.5.14",
+    "sdk": "3.5.2",
+    "info_url": "https://docs.global.canton.network.sync.global/info",
+    "versions_url": "https://docs.global.canton.network.sync.global/app_dev/overview/version_information.html",
+    "canton_archive_sha256": "3bb2aba79e4704cc735dc7f1fcc0227fd9e0d85758eeff529faf63266c3ee0f5"
+  },
+  "testnet": {
+    "splice": "0.7.5",
+    "canton": "3.5.15",
+    "sdk": "3.5.2",
+    "info_url": "https://docs.test.global.canton.network.sync.global/info",
+    "versions_url": "https://docs.test.global.canton.network.sync.global/app_dev/overview/version_information.html",
+    "canton_archive_sha256": "a11453d98917be6136cb2eaa3f800f5b67ee59ecff75907f7b59b4ccfd3766b8"
+  }
+}
