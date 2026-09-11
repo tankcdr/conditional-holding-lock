@@ -4,7 +4,7 @@
   CIP: TBD
   Layer: Daml
   Title: Conditional Holding Lock
-  Author: Chris Madison <[email]>
+  Author: Chris Madison <email>cmadison@longrunadvisory.com</email>
   Status: Draft
   Type: Standards Track
   Created: 2026-09-10

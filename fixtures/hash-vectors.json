@@ -1,5 +1,5 @@
 {
-  "domain": "raw 32-byte preimage, hex-encoded lowercase. Daml: DA.Crypto.Text.{sha256,keccak256}. EVM: sha256(bytes32) / keccak256(bytes32).",
+  "domain": "raw 32-byte preimage, hex-encoded lowercase. Daml: DA.Crypto.Text.{sha256,keccak256}. EVM: sha256(bytes32) / keccak256(bytes32). Solana: sol_sha256 / sol_keccak256 over the decoded bytes.",
   "vectors": [
     {
       "id": "zero",

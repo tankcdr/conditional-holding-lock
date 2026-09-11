@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-11T14:43:16.668385+00:00",
+  "checked_at": "2026-09-11T15:01:05.673054+00:00",
   "source_verification": {
     "checked_at": "2026-09-11T14:32:12.233188+00:00",
     "splice_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
@@ -169,5 +169,33 @@
         "TestHashVectors:test_invalidPreimagesAreRejectedBeforeHashing"
       ]
     }
-  ]
+  ],
+  "solana": {
+    "checked_at": "2026-09-11T15:01:05.673054+00:00",
+    "execution": "local LiteSVM, compiled SBF program, signed transactions, no RPC or public-cluster deployment",
+    "agave_cli": "3.1.14",
+    "agave_runtime_dependencies": "3.1.14",
+    "litesvm": "0.9.1",
+    "solana_program_crate": "3.0.0",
+    "host_rust": "1.89.0",
+    "sbf_platform_tools": "v1.52",
+    "sbf_arch": "v0",
+    "shared_vectors": 6,
+    "hash_algorithms": [
+      "sha256",
+      "keccak256"
+    ],
+    "passed": [
+      "hash_syscalls_match_shared_daml_and_evm_vectors",
+      "rejects_hex_text_instead_of_raw_bytes",
+      "rejects_wrong_preimage_lengths"
+    ],
+    "sbf_program_sha256": "c1a9ccc4e2b0443c046a761efaf5c334e9b22dd82f05b2e2b5cf6d806f6325ca",
+    "cargo_lock_sha256": "4f08b02d84e0c9475dfb1f2dd8f111da6e49c71a68389269ebfafc26a6797a43",
+    "fixture_sha256": "d15dfa7a36483a165d6802dc170c27ce3103b5817608b64fcc8f98ad8360f79d",
+    "hash_syscall_imports_verified": [
+      "sol_sha256",
+      "sol_keccak256"
+    ]
+  }
 }

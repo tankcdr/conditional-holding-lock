@@ -8,6 +8,7 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 conditional_lock_java
 
 command -v forge >/dev/null 2>&1 || { echo 'Foundry is required for the EVM hash proof.' >&2; exit 1; }
+command -v cargo-build-sbf >/dev/null 2>&1 || { echo 'Solana SBF tools are required for the Solana hash proof.' >&2; exit 1; }
 python3 "$ROOT/scripts/generate-hash-vectors.py" --check
 
 "$ROOT/scripts/build-dars.sh"
@@ -17,3 +18,5 @@ echo "==> Daml Script (Java $(java -version 2>&1 | head -1))"
 
 echo "==> EVM hash vectors"
 ( cd "$ROOT/contracts/evm" && forge test -vv )
+
+"$ROOT/scripts/test-solana.sh"

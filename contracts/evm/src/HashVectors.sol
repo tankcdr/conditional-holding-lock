@@ -10,6 +10,8 @@ contract HashVectors {
     }
 
     function keccak256Bytes32(bytes32 preimage) external pure returns (bytes32) {
+        // Keep the reference's raw-byte encoding explicit for cross-language comparison.
+        // forge-lint: disable-next-line(asm-keccak256)
         return keccak256(abi.encodePacked(preimage));
     }
 }

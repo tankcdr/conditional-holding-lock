@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {HashVectors} from "../src/HashVectors.sol";
 import {HashVectorData} from "./generated/HashVectorData.sol";
 
-/// Both languages consume generated constants from the same reviewed JSON.
+/// Expected digests come from the reviewed JSON shared with Daml and Solana.
 /// No forge-std checkout or network dependency is needed to run these tests.
 contract HashVectorsTest {
     HashVectors internal h = new HashVectors();

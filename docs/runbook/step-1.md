@@ -10,6 +10,7 @@ Evaluation date: **September 11, 2026**. Scope: the first implementation milesto
 | First-party language target | LF 2.1; explicit serializability | Matches the V2 packages; no development LF target |
 | Java | Global JDK 26; project tests select installed JDK 21 | Tests no longer depend on an unsupported global Java or stale `JAVA_HOME` |
 | Foundry | 1.3.6, Solidity 0.8.24 | Both byte-domain hash algorithms tested |
+| Solana | Agave CLI/runtime dependencies 3.1.14, platform-tools v1.52, Rust 1.89.0, LiteSVM 0.9.1 | Compiled SBF program matches both hashes on the shared vectors in a local VM |
 | Existing shared Docker stack | Splice 0.6.7; Canton image 0.6.8 reports engine 3.5.4 | Older than the networks; owned by another checkout and left running |
 | Mainnet reference | Splice 0.7.4 / Canton 3.5.14 / SDK 3.5.2 | Isolated local Ledger API matrix target |
 | Testnet reference | Splice 0.7.5 / Canton 3.5.15 / SDK 3.5.2 | Isolated local Ledger API matrix target |
@@ -20,7 +21,7 @@ The published DAR dependencies come from Splice main commit [`6b82367efb9ca6f94c
 
 ## Executable proofs
 
-**Result: PASS.** All 23 Daml Scripts passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors.
+**Result: PASS.** All 23 Daml Scripts passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
 
 Run from the repository root:
 
@@ -30,11 +31,12 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The suite has 23 Daml Scripts and two Solidity tests. Each runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. Evidence includes the compiled package IDs and DAR hashes. The published snapshot is [step-1-evidence.json](step-1-evidence.json).
+The normal suite has 23 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [step-1-evidence.json](step-1-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
 | SHA-256 and Keccak match EVM byte-domain hashing | `TestHashVectors:test_hashVectorsMatchEvm`; six shared vectors, both Daml builtins and the policy helper, uppercase normalization; two Foundry tests use the same generated fixtures |
+| The same byte domain works on Solana | `contracts/solana/tests/hash_vectors.rs` loads the compiled SBF program into LiteSVM, submits transactions, and compares both returned digests with the shared JSON; negative cases reject wrong lengths and hex text |
 | Receiver authority survives acceptance | `test_receiverAuthorityPersistsAndOwnerDoesNotEnact`; Alice funds, Bob accepts separately, the arbiter alone enacts the hash rule, and an actual TestTokenV2 holding is created for Bob |
 | Both actors can lock in one step | `test_oneStepBothActorsAndOwnerChange`; Alice and Bob act, no instruction remains, 100 is locked and 25 is returned from a 125 input; V1 and V2 views are checked |
 | Atomic settlement of two instruments | `test_atomicDvpAcrossTwoTestTokenV2Registries`; X and Y have distinct admins and TokenRules, and one submission contains exactly two root Enact exercises |
@@ -64,5 +66,7 @@ Two narrow corrections are included in the CIP:
 ## Scope of the compatibility claim
 
 The proofs establish compilation and execution of these Daml contracts on the current network runtime versions. The test topology has one participant and one synchronizer with controlled ledger time. It does not establish a public-network deployment, multi-participant operational behavior, network traffic economics, production authentication, external signing, or Splice wallet/registry integration.
+
+The Solana addition is a local hash compatibility proof using pinned Agave runtime dependencies. It does not implement a token escrow or validate a live Solana cluster's feature set. See the [hash-vector runbook](hash-vectors.md#solana-proof) for the exact program input, output, and toolchain.
 
 The original shared Docker topology is still old and must not be described as mainnet-equivalent. Use the isolated matrix for this milestone. A production registry still needs its account controls, pause/allow-list behavior, HTTP choice contexts, distinct-ID issuance, and the full token-standard conformance suite. Canton Coin requires the planned LockedAmulet/ExternalPartyAmuletRules and CIP-0107 work. No outreach or subscriptions were performed as part of this implementation milestone.
