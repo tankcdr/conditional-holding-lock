@@ -4,6 +4,19 @@ Apache-2.0 reference code for [CIP-TBD-Conditional-Holding-Lock](docs/cip/CIP-TB
 
 Step 1 provides the interface package, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent receiver authorization, one-step locking, and atomic two-registry settlement. See the [compatibility and proof report](docs/runbook/step-1.md).
 
+## Worked examples
+
+The Development Fund proposal's M1 promise of Daml Script tests for all six CIP section 4 worked examples maps to the scripts in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 29 Daml Scripts, including the 23 mechanics proofs.
+
+| CIP section 4 example | Named script | Mechanics proofs it relies on |
+| --- | --- | --- |
+| HTLC leg | `test_example_htlcLeg` | receiver authority, expiry boundary, Keccak vs SHA-256, hash vectors |
+| Executor-free DvP | `test_example_executorFreeDvp` | atomic two-registry DvP, rollback, threshold spoofing |
+| Arbiter escrow | `test_example_arbiterEscrow` | distribute bounds, multiple receivers, partial fallback |
+| Vesting | `test_example_vesting` | partial release conservation, spent-rule resurrection, nested guard boundaries |
+| Collateral | `test_example_collateral` | unlock without acceptance, amend top-up, amend cannot change asset |
+| Conditional payment | `test_example_conditionalPayment` | nested guards (inclusive After, exclusive Before), enactor and threshold |
+
 ## Build and prove
 
 Use [Just](https://github.com/casey/just) as the command runner (verified with 1.58.0; `brew install just` on macOS):

@@ -20,6 +20,12 @@ required = {
     "TestConditionalLock:test_oneStepBothActorsAndOwnerChange",
     "TestConditionalLock:test_atomicDvpAcrossTwoTestTokenV2Registries",
     "TestConditionalLock:test_atomicDvpRollsBackFirstEnactWhenSecondFails",
+    "TestWorkedExamples:test_example_htlcLeg",
+    "TestWorkedExamples:test_example_executorFreeDvp",
+    "TestWorkedExamples:test_example_arbiterEscrow",
+    "TestWorkedExamples:test_example_vesting",
+    "TestWorkedExamples:test_example_collateral",
+    "TestWorkedExamples:test_example_conditionalPayment",
 }
 if version != config["canton"] or not required.issubset(results) or any("result" not in r for r in results.values()):
     raise SystemExit("Runtime mismatch, missing core proofs, or failed scripts; see " + str(run))

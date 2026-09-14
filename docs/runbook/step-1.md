@@ -1,6 +1,6 @@
 # Step 1: compilation, authority, and atomicity
 
-Evaluation date: **September 11, 2026**. Scope: the first implementation milestone in the week-of-September-14 plan. The private outreach, standards sponsorship, registry HTTP endpoints, wallet integration, and Canton Coin implementation are later work.
+Evaluation date: **September 14, 2026**. Scope: the first implementation milestone in the week-of-September-14 plan. The private outreach, standards sponsorship, registry HTTP endpoints, wallet integration, and Canton Coin implementation are later work.
 
 ## Environment and compatibility
 
@@ -21,7 +21,7 @@ The published DAR dependencies come from Splice main commit [`6b82367efb9ca6f94c
 
 ## Executable proofs
 
-**Result: PASS.** All 23 Daml Scripts passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
+**Result: PASS.** All 29 Daml Scripts passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
 
 Run from the repository root:
 
@@ -31,7 +31,7 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The normal suite has 23 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [step-1-evidence.json](step-1-evidence.json).
+The normal suite has 29 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [step-1-evidence.json](step-1-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
@@ -43,6 +43,53 @@ The normal suite has 23 Daml Scripts, two Solidity tests, and three Solana SBF t
 | Atomic settlement also fails atomically | `test_atomicDvpRollsBackFirstEnactWhenSecondFails`; the second guard fails, both locks and backing holdings remain, neither payout exists, and the original contracts can then settle successfully together |
 
 Additional proofs cover account-provider acceptance, sequential acceptance by multiple receivers, controller spoofing and duplicate threshold actors, rule consumption, conservation across partial releases and top-ups, bounded distribution, exact expiry, pending withdrawal, rejection, unanimous cancellation/amendment, prevention of spent-rule resurrection, malformed funding/terms/preimages, Keccak enactment, repeated partial fallbacks, and both sides of V2 event reporting.
+
+## Worked-example coverage
+
+The Development Fund proposal's M1 promise of Daml Script tests for all six CIP section 4 worked examples maps to [TestWorkedExamples.daml](../../packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each named script combines the specified successful and rejected steps with holdings, lock-continuation, and V2 event assertions.
+
+| CIP section 4 example | Named script | Mechanics proofs it relies on |
+| --- | --- | --- |
+| HTLC leg | `test_example_htlcLeg` | receiver authority, expiry boundary, Keccak vs SHA-256, hash vectors |
+| Executor-free DvP | `test_example_executorFreeDvp` | atomic two-registry DvP, rollback, threshold spoofing |
+| Arbiter escrow | `test_example_arbiterEscrow` | distribute bounds, multiple receivers, partial fallback |
+| Vesting | `test_example_vesting` | partial release conservation, spent-rule resurrection, nested guard boundaries |
+| Collateral | `test_example_collateral` | unlock without acceptance, amend top-up, amend cannot change asset |
+| Conditional payment | `test_example_conditionalPayment` | nested guards (inclusive After, exclusive Before), enactor and threshold |
+
+The HTLC script uses the first fixture, `zero`, for the basic SHA-256 claim and the exact-expiry refund. It uses `ascending-bytes`, whose hex encoding contains letters, to check case normalization and algorithm separation. The same preimage bytes must satisfy each algorithm's matching digest and fail against the other algorithm's digest. This makes the guard's algorithm selection observable while keeping the witness fixed.
+
+| HTLC case | Fault the assertions detect |
+| --- | --- |
+| `zero`: wrong witness rejected, correct witness pays Bob | A guard that skips digest validation or releases to the wrong account |
+| `zero`: claim rejected at exact expiry, Alice receives the refund | An inclusive claim-expiry boundary or a fallback that loses or redirects funds |
+| `ascending-bytes`: uppercase witness accepted with matching SHA-256 and Keccak-256 digests | Rejection of uppercase hex, hashing hex text instead of decoded bytes, or selecting the wrong algorithm |
+| `ascending-bytes`: SHA-256 with the Keccak-256 digest and Keccak-256 with the SHA-256 digest both reject the same witness; funds return at expiry | Ignoring the selected algorithm, accepting either digest, or consuming locked funds on a failed claim |
+
+### Targeted fault injection
+
+Seven deliberate faults were applied separately to temporary copies of the reference adapter. Every modified adapter compiled, and its selected worked-example script then failed at runtime on the IDE ledger. The checks left the working-tree adapter and interface source unchanged.
+
+| Injected fault | Script that caught it |
+| --- | --- |
+| Remove preimage case normalization | `test_example_htlcLeg` |
+| Accept either hash algorithm's digest regardless of the selected algorithm | `test_example_htlcLeg` |
+| Make `Guard_After` strict, rejecting the boundary instant | `test_example_vesting` |
+| Make `Guard_Before` inclusive, accepting the deadline instant | `test_example_conditionalPayment` |
+| Remove the distribution receiver allow-list check | `test_example_arbiterEscrow` |
+| Remove amendment funding conservation | `test_example_collateral` |
+| Report the wrong receiver side in a transfer event | `test_example_executorFreeDvp` |
+
+The `worked_example_mutations` section of [step-1-evidence.json](step-1-evidence.json) records the exact replacements, commands, and observed errors. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the adapter, and run the named script from the test package:
+
+```bash
+cd packages/conditional-lock-test-token
+dpm build
+cd ../conditional-lock-test
+dpm test --files daml/TestWorkedExamples.daml -p 'test_example_<name>'
+```
+
+Substitute the script suffix from the table for `<name>`. These checks provide targeted sensitivity evidence for the seven listed faults; exhaustive mutation coverage was not measured.
 
 ## Implementation decisions
 

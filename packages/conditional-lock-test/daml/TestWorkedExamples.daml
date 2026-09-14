@@ -1,0 +1,545 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestWorkedExamples where
+
+import DA.Assert
+import DA.Foldable (forA_)
+import DA.List (dedup, head, tail)
+import DA.Optional (fromSome)
+import DA.Text qualified as Text
+import DA.TextMap qualified as TextMap
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.TransferEventsV2 qualified as Events
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 qualified as Token
+import ConditionalLock.Policy (accountParties, namedParties, termReceivers, prefix)
+import ConditionalLock.TestToken qualified as Impl
+import Generated.HashVectors (vectors)
+import TestConditionalLock
+  ( setup, account, termsFor, mint, factory, extra
+  , asLocked, asPending, enactArg, assertToken, assertConsumed, holdingsChanges )
+
+type LockHandle = (ContractId CL.ConditionalLock, ContractId V2.Holding)
+
+-- Reuse the reference registry and funding helpers. Each workflow has its own
+-- registry-issued ID. The owner locks first; each receiver accepts separately.
+-- Guard parties and enactors do not accept unless they are also receivers.
+lockAccepted : ContractId Token.TokenRules -> Text -> CL.LockTerms -> Script LockHandle
+lockAccepted rules lockId terms = do
+  input <- mint terms terms.amount
+  f <- factory rules terms lockId
+  let owners = accountParties terms.owner
+  result <- submit (actAs owners <> readAs [terms.instrumentId.admin]) $
+    exerciseCmd f $ CL.ConditionalLockFactory_Lock terms [input] owners extra
+  accepted <- acceptReceivers terms result (termReceivers terms)
+  handle <- asLocked accepted
+  checkLive (fromSome terms.owner.owner) lockId terms handle
+  pure handle
+
+acceptReceivers : CL.LockTerms -> CL.ConditionalLockResult -> [V2.Account] -> Script CL.ConditionalLockResult
+acceptReceivers _ result [] = pure result
+acceptReceivers terms result (receiver :: rest) = do
+  cid <- asPending result
+  Some view <- queryInterfaceContractId (fromSome terms.owner.owner) cid
+  view.pendingReceivers === receiver :: rest
+  let actors = accountParties receiver
+  accepted <- submit (actAs actors) $ exerciseCmd cid $
+    CL.ConditionalLockInstruction_Accept receiver actors extra
+  acceptReceivers terms accepted rest
+
+checkLive : Party -> Text -> CL.LockTerms -> LockHandle -> Script ()
+checkLive owner lockId terms (cid, holding) = do
+  Some view <- queryInterfaceContractId owner cid
+  view.lockId === lockId
+  view.terms === terms
+  view.holdingCid === holding
+  Some backing <- queryInterfaceContractId owner holding
+  backing.account === terms.owner
+  backing.instrumentId === terms.instrumentId
+  backing.amount === terms.amount
+  let backingLock = fromSome backing.lock
+  backingLock.holders === namedParties terms
+  backingLock.expiresAt === Some terms.expiresAt
+  backingLock.expiresAfter === None
+
+assertBalance : Party -> V2.Account -> V2.InstrumentId -> Decimal -> Script ()
+assertBalance party owner instrument amount = do
+  tokens <- query @Token.Token party
+  let owned = [ t.holding | (_, t) <- tokens,
+        t.holding.account == owner, t.holding.instrumentId == instrument ]
+  sum (map (.amount) owned) === amount
+  assert (all (\h -> h.lock == None) owned)
+
+-- Inspect the actual V2 event choices in the enactment transaction and resolve
+-- their output CIDs to published TestTokenV2 holdings. A continuation must have
+-- exactly the expected terms and a matching backing; a terminal lock is absent.
+-- Filtering by registry lets the same assertions inspect each half of a DvP.
+checkEnactment : Party -> Text -> CL.LockTerms -> LockHandle -> Text -> [CL.Leg]
+  -> Optional CL.LockTerms -> [TreeEvent] -> Script (Optional LockHandle, [Text])
+checkEnactment owner lockId terms (cid, holding) ruleId legs expectedNext roots = do
+  assertConsumed owner cid holding
+  locks <- query @Impl.ActiveLock owner
+  let matching = [ (toInterfaceContractId nextCid, toInterfaceContractId active.state.holdingCid)
+        | (nextCid, active) <- locks, active.state.lockId == lockId ]
+  next <- case (expectedNext, matching) of
+    (None, []) -> pure None
+    (Some nextTerms, [handle]) -> do
+      nextTerms.amount === terms.amount - sum (map (.amount) legs)
+      checkLive owner lockId nextTerms handle
+      pure (Some handle)
+    _ -> abort "unexpected terminal or continuing lock state"
+  let changes = filter (\event -> event.admin == terms.instrumentId.admin) (holdingsChanges roots)
+  let receivers = dedup [ leg.receiver | leg <- legs, leg.receiver /= terms.owner ]
+  map (.account) changes === terms.owner :: receivers
+  let ownerChange = head changes
+  ownerChange.inputHoldingCids === [holding]
+  let ownerLegs = filter (\leg -> leg.receiver == terms.owner) legs
+  let ownerOutputs = take (length ownerLegs) ownerChange.outputHoldingCids
+  length ownerOutputs === length ownerLegs
+  forA_ (zip ownerLegs ownerOutputs) $ \(leg, out) ->
+    assertToken owner out terms.owner terms.instrumentId leg.amount
+  drop (length ownerLegs) ownerChange.outputHoldingCids === optional [] (pure . snd) next
+  let outgoing = ownerChange.transferLegSides
+  let transfers = filter (\leg -> leg.receiver /= terms.owner) legs
+  map (.amount) outgoing === map (.amount) transfers
+  map (.otherside) outgoing === map (.receiver) transfers
+  map (.side) outgoing === replicate (length transfers) Events.SenderSide
+  let ids = map (.transferLegId) outgoing
+  length (dedup ids) === length transfers
+  let kind = if null transfers then "unlock" else "transfer"
+  forA_ changes $ \event -> do
+    TextMap.lookup (prefix <> "tx-kind") event.extraArgs.meta.values === Some kind
+    TextMap.lookup (prefix <> "conditional-lock/rule-id") event.extraArgs.meta.values === Some ruleId
+    forA_ event.transferLegSides $ \side -> do
+      side.instrumentId === terms.instrumentId.id
+      side.meta === event.extraArgs.meta
+      case Text.splitOn "/" side.transferLegId of
+        [eventLock, eventRule, revision, index] -> do
+          eventLock === lockId
+          eventRule === ruleId
+          assert (revision /= "" && index /= "")
+        _ -> abort "leg ID must carry lock ID, rule ID, revision and leg index"
+  forA_ (tail changes) $ \received -> do
+    received.inputHoldingCids === []
+    let receivedLegs = filter (\leg -> leg.receiver == received.account) transfers
+    length received.outputHoldingCids === length receivedLegs
+    forA_ (zip receivedLegs received.outputHoldingCids) $ \(leg, out) ->
+      assertToken (fromSome received.account.owner) out received.account terms.instrumentId leg.amount
+    let sent = filter (\side -> side.otherside == received.account) outgoing
+    let expectedSides = map (\side -> side with side = Events.ReceiverSide; otherside = terms.owner) sent
+    received.transferLegSides === expectedSides
+  pure (next, ids)
+
+-- | CIP section 4, item 1: HTLC leg.
+-- Alice locks 100 X; Bob's claim requires SHA-256 H and transfers 100 to Bob.
+-- Expiry is t0 + 24h with an owner unlock fallback. Alice funds, then Bob accepts.
+test_example_htlcLeg : Script ()
+test_example_htlcLeg = do
+  e <- setup ()
+  let (_, preimage, sha, _) = head vectors
+  let (_, wrongPreimage, _, _) = fromSome $ find (\(id, _, _, _) -> id == "0x01-repeated") vectors
+  let payout = [CL.Leg (account e.bob) 100.0]
+  let htlc env algorithm digest = (termsFor env) with
+        rules = [CL.Rule "claim" [e.bob] (CL.Guard_Preimage algorithm digest) (CL.Outcome_Transfer payout)]
+  let terms = htlc e CL.Sha256 sha
+  first@(cid, _) <- lockAccepted e.rulesA "htlc-claim" terms
+  submitMustFail e.bob $ exerciseCmd cid $
+    (enactArg "claim" [e.bob]) with witness = CL.Witness [wrongPreimage]
+  tree <- submitTree e.bob $ exerciseCmd cid $
+    (enactArg "claim" [e.bob]) with witness = CL.Witness [preimage]
+  _ <- checkEnactment e.alice "htlc-claim" terms first "claim" payout None tree.rootEvents
+  assertBalance e.bob (account e.bob) terms.instrumentId 100.0
+
+  second@(expiredCid, _) <- lockAccepted e.rulesA "htlc-expiry" terms
+  setTime terms.expiresAt
+  submitMustFail e.bob $ exerciseCmd expiredCid $
+    (enactArg "claim" [e.bob]) with witness = CL.Witness [preimage]
+  checkLive e.alice "htlc-expiry" terms second
+  refunded <- submitTree e.alice $ exerciseCmd expiredCid $ CL.ConditionalLock_Expire [e.alice] None extra
+  _ <- checkEnactment e.alice "htlc-expiry" terms second "fallback"
+    [CL.Leg terms.owner 100.0] None refunded.rootEvents
+  assertBalance e.alice terms.owner terms.instrumentId 100.0
+
+  now <- getTime
+  -- Use bytes 00..1f for casing and algorithm selection. Unlike the zero
+  -- vector, its uppercase form differs. Both algorithms must accept those
+  -- same bytes under their own digest and reject the other algorithm's digest.
+  let (_, letters, lettersSha, lettersKeccak) = fromSome $
+        find (\(id, _, _, _) -> id == "ascending-bytes") vectors
+  let uppercase = Text.asciiToUpper letters
+  assert (uppercase /= letters)
+  forA_ [("keccak", CL.Keccak256, lettersKeccak), ("sha256", CL.Sha256, lettersSha)] $
+    \(name, algorithm, digest) -> do
+      let validTerms = htlc (e with now) algorithm digest
+      let lockId = "htlc-" <> name
+      valid@(validCid, _) <- lockAccepted e.rulesA lockId validTerms
+      submitMustFail e.bob $ exerciseCmd validCid $
+        (enactArg "claim" [e.bob]) with witness = CL.Witness [wrongPreimage]
+      validTree <- submitTree e.bob $ exerciseCmd validCid $
+        (enactArg "claim" [e.bob]) with witness = CL.Witness [uppercase]
+      _ <- checkEnactment e.alice lockId validTerms valid "claim" payout None validTree.rootEvents
+      pure ()
+  assertBalance e.bob (account e.bob) terms.instrumentId 300.0
+
+  -- Cross-paired digests catch an implementation that dispatches to the wrong
+  -- hash or accepts either hash regardless of the agreed algorithm. Use the
+  -- lowercase witness here so rejection cannot be caused by uppercase parsing.
+  mismatched <- forA [("sha-with-keccak-digest", CL.Sha256, lettersKeccak),
+                      ("keccak-with-sha-digest", CL.Keccak256, lettersSha)] $
+    \(name, algorithm, digest) -> do
+      let mismatchTerms = htlc (e with now) algorithm digest
+      handle <- lockAccepted e.rulesA name mismatchTerms
+      submitMustFail e.bob $ exerciseCmd (fst handle) $
+        (enactArg "claim" [e.bob]) with witness = CL.Witness [letters]
+      checkLive e.alice name mismatchTerms handle
+      pure (name, mismatchTerms, handle)
+  assertBalance e.bob (account e.bob) terms.instrumentId 300.0
+  setTime (now `addRelTime` hours 24)
+  forA_ mismatched $ \(name, mismatchTerms, handle) -> do
+    refundTree <- submitTree e.alice $ exerciseCmd (fst handle) $
+      CL.ConditionalLock_Expire [e.alice] None extra
+    _ <- checkEnactment e.alice name mismatchTerms handle "fallback"
+      [CL.Leg terms.owner 100.0] None refundTree.rootEvents
+    pure ()
+  assertBalance e.alice terms.owner terms.instrumentId 300.0
+
+-- | CIP section 4, item 2: Executor-free DvP.
+-- Alice locks 100 X under AX and Bob locks 50 Y under AY. Both settle rules
+-- name Alice and Bob as enactors and require their two-party threshold.
+-- Each transfers to the other account; expiry is t0 + 24h with unlock fallback.
+test_example_executorFreeDvp : Script ()
+test_example_executorFreeDvp = do
+  e <- setup ()
+  let actors = [e.alice, e.bob]
+  let policyGuard = CL.Guard_Parties actors 2
+  let xLegs = [CL.Leg (account e.bob) 100.0]
+  let yLegs = [CL.Leg (account e.alice) 50.0]
+  let x = (termsFor e) with
+        rules = [CL.Rule "settle" actors policyGuard (CL.Outcome_Transfer xLegs)]
+  let y = x with
+        owner = account e.bob
+        instrumentId = V2.InstrumentId e.adminB "Y"
+        amount = 50.0
+        rules = [CL.Rule "settle" actors policyGuard (CL.Outcome_Transfer yLegs)]
+  assert (x.instrumentId.admin /= y.instrumentId.admin)
+  xFirst@(xCid, _) <- lockAccepted e.rulesA "dvp-x" x
+  yFirst@(yCid, _) <- lockAccepted e.rulesB "dvp-y" y
+  tree <- submitTree (actAs actors <> readAs [e.adminA, e.adminB]) $
+    exerciseCmd xCid (enactArg "settle" actors) *>
+    exerciseCmd yCid (enactArg "settle" actors)
+  length tree.rootEvents === 2
+  (_, xIds) <- checkEnactment e.alice "dvp-x" x xFirst "settle" xLegs None tree.rootEvents
+  (_, yIds) <- checkEnactment e.bob "dvp-y" y yFirst "settle" yLegs None tree.rootEvents
+  length (dedup (xIds <> yIds)) === 2
+  assertBalance e.bob (account e.bob) x.instrumentId 100.0
+  assertBalance e.alice (account e.alice) y.instrumentId 50.0
+
+  xSecond@(xRetry, _) <- lockAccepted e.rulesA "dvp-rollback-x" x
+  ySecond@(yRetry, _) <- lockAccepted e.rulesB "dvp-rollback-y" y
+  -- Alice is an enactor but cannot meet the two-party guard by herself.
+  submitMustFail e.alice $ exerciseCmd xRetry $ enactArg "settle" [e.alice]
+  beforeAlice <- query @Token.Token e.alice
+  beforeBob <- query @Token.Token e.bob
+  submitMustFail (actAs actors <> readAs [e.adminA, e.adminB]) $
+    exerciseCmd xRetry (enactArg "settle" actors) *>
+    exerciseCmd yRetry (enactArg "wrong-rule" actors)
+  checkLive e.alice "dvp-rollback-x" x xSecond
+  checkLive e.bob "dvp-rollback-y" y ySecond
+  query @Token.Token e.alice >>= (=== beforeAlice)
+  query @Token.Token e.bob >>= (=== beforeBob)
+  corrected <- submitTree (actAs actors <> readAs [e.adminA, e.adminB]) $
+    exerciseCmd xRetry (enactArg "settle" actors) *>
+    exerciseCmd yRetry (enactArg "settle" actors)
+  length corrected.rootEvents === 2
+  (_, xRetryIds) <- checkEnactment e.alice "dvp-rollback-x" x xSecond "settle" xLegs None corrected.rootEvents
+  (_, yRetryIds) <- checkEnactment e.bob "dvp-rollback-y" y ySecond "settle" yLegs None corrected.rootEvents
+  length (dedup (xIds <> yIds <> xRetryIds <> yRetryIds)) === 4
+  assertBalance e.bob (account e.bob) x.instrumentId 200.0
+  assertBalance e.alice (account e.alice) y.instrumentId 100.0
+
+-- | CIP section 4, item 3: Arbiter escrow.
+-- Buyer locks 100.0 with an award rule enacted by Arbiter, guarded by
+-- Guard_Parties [Arbiter] 1, and distributed only to Buyer and Seller accounts.
+-- Expiry is t0 + 24h and the fallback unlocks the remaining amount to Buyer.
+test_example_arbiterEscrow : Script ()
+test_example_arbiterEscrow = do
+  e <- setup ()
+  let buyer = e.alice
+  let seller = e.bob
+  let terms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (CL.Guard_Parties [e.arbiter] 1)
+          (CL.Outcome_Distribute [account buyer, account seller])]
+  let award legs = (enactArg "award" [e.arbiter]) with legs = Some legs
+  -- Buyer funds first; Seller separately accepts. Buyer's own account needs
+  -- no acceptance, which lockAccepted verifies against the pending receivers.
+  full <- lockAccepted e.rulesA "example-escrow-full" terms
+  let fullLegs = [CL.Leg (account seller) 100.0]
+  fullTree <- submitTree e.arbiter $ exerciseCmd (fst full) $ award fullLegs
+  (_, fullIds) <- checkEnactment buyer "example-escrow-full" terms full
+    "award" fullLegs None fullTree.rootEvents
+  length fullIds === 1
+  assertBalance seller (account seller) terms.instrumentId 100.0
+
+  split <- lockAccepted e.rulesA "example-escrow-split" terms
+  let splitLegs = [CL.Leg (account seller) 60.0, CL.Leg (account buyer) 40.0]
+  splitTree <- submitTree e.arbiter $ exerciseCmd (fst split) $ award splitLegs
+  (_, splitIds) <- checkEnactment buyer "example-escrow-split" terms split
+    "award" splitLegs None splitTree.rootEvents
+  -- The Buyer output is an unlocked holdings change, so only Seller's
+  -- payment appears as a transfer leg, with matching sender and receiver sides.
+  length splitIds === 1
+  assertBalance seller (account seller) terms.instrumentId 160.0
+  assertBalance buyer (account buyer) terms.instrumentId 40.0
+
+  rejected <- lockAccepted e.rulesA "example-escrow-rejections" terms
+  -- Charlie authorizes receiving in this attempted transaction, so rejection
+  -- must come from the agreed receiver list, not missing account authority.
+  let outsideActors = [e.arbiter, e.charlie]
+  submitMustFail outsideActors $ exerciseCmd (fst rejected) $
+    (enactArg "award" outsideActors) with legs = Some [CL.Leg (account e.charlie) 100.0]
+  checkLive buyer "example-escrow-rejections" terms rejected
+  submitMustFail e.arbiter $ exerciseCmd (fst rejected) $
+    award [CL.Leg (account seller) 60.01, CL.Leg (account buyer) 40.0]
+  checkLive buyer "example-escrow-rejections" terms rejected
+  forA_ [buyer, seller] $ \actor -> do
+    submitMustFail actor $ exerciseCmd (fst rejected) $
+      (enactArg "award" [actor]) with legs = Some fullLegs
+    checkLive buyer "example-escrow-rejections" terms rejected
+  assertBalance seller (account seller) terms.instrumentId 160.0
+  assertBalance buyer (account buyer) terms.instrumentId 40.0
+
+  partial <- lockAccepted e.rulesA "example-escrow-partial" terms
+  let partialLegs = [CL.Leg (account seller) 30.0]
+  let remaining = terms with amount = 70.0; rules = []
+  partialTree <- submitTree e.arbiter $ exerciseCmd (fst partial) $ award partialLegs
+  (next, partialIds) <- checkEnactment buyer "example-escrow-partial" terms partial
+    "award" partialLegs (Some remaining) partialTree.rootEvents
+  length partialIds === 1
+  assertBalance seller (account seller) terms.instrumentId 190.0
+  let continuation = fromSome next
+  -- A partial distribution consumes the sole award rule as well as 30.0.
+  submitMustFail e.arbiter $ exerciseCmd (fst continuation) $ award partialLegs
+  checkLive buyer "example-escrow-partial" remaining continuation
+  setTime remaining.expiresAt
+  expiryTree <- submitTree buyer $ exerciseCmd (fst continuation) $
+    CL.ConditionalLock_Expire [buyer] None extra
+  (_, expiryIds) <- checkEnactment buyer "example-escrow-partial" remaining continuation
+    "fallback" [CL.Leg (account buyer) 70.0] None expiryTree.rootEvents
+  expiryIds === []
+  assertBalance buyer (account buyer) terms.instrumentId 110.0
+
+-- | CIP section 4, item 4: Vesting.
+-- Grantor locks 100.0 for Grantee in four 25.0 transfer rules, tranche-1
+-- through tranche-4, enacted by Grantee and guarded by Guard_After at
+-- t0 + 1h, +2h, +3h, and +4h. Expiry is t0 + 48h, with an unlock fallback.
+test_example_vesting : Script ()
+test_example_vesting = do
+  e <- setup ()
+  let grantor = e.alice
+  let grantee = e.bob
+  let termsAt t0 = (termsFor e) with
+        rules = [CL.Rule ("tranche-" <> show k) [grantee]
+          (CL.Guard_After (t0 `addRelTime` hours k))
+          (CL.Outcome_Transfer [CL.Leg (account grantee) 25.0]) | k <- [1 .. 4]]
+        expiresAt = t0 `addRelTime` hours 48
+        requestedAt = t0 `addRelTime` seconds (-1)
+  let terms = termsAt e.now
+  let legs = [CL.Leg (account grantee) 25.0]
+  -- Grantor funds first and Grantee accepts in a separate submission.
+  initial <- lockAccepted e.rulesA "example-vesting-complete" terms
+  submitMustFail grantee $ exerciseCmd (fst initial) $ enactArg "tranche-1" [grantee]
+  checkLive grantor "example-vesting-complete" terms initial
+
+  setTime (e.now `addRelTime` hours 1)
+  let afterFirst = terms with amount = 75.0; rules = drop 1 terms.rules
+  firstTree <- submitTree grantee $ exerciseCmd (fst initial) $ enactArg "tranche-1" [grantee]
+  (firstNext, firstIds) <- checkEnactment grantor "example-vesting-complete" terms initial
+    "tranche-1" legs (Some afterFirst) firstTree.rootEvents
+  let first = fromSome firstNext
+  assertBalance grantee (account grantee) terms.instrumentId 25.0
+  submitMustFail grantee $ exerciseCmd (fst first) $ enactArg "tranche-1" [grantee]
+  checkLive grantor "example-vesting-complete" afterFirst first
+
+  setTime (e.now `addRelTime` hours 2)
+  let afterSecond = terms with amount = 50.0; rules = drop 2 terms.rules
+  secondTree <- submitTree grantee $ exerciseCmd (fst first) $ enactArg "tranche-2" [grantee]
+  (secondNext, secondIds) <- checkEnactment grantor "example-vesting-complete" afterFirst first
+    "tranche-2" legs (Some afterSecond) secondTree.rootEvents
+  let second = fromSome secondNext
+  assertBalance grantee (account grantee) terms.instrumentId 50.0
+
+  setTime (e.now `addRelTime` hours 3)
+  let afterThird = terms with amount = 25.0; rules = drop 3 terms.rules
+  thirdTree <- submitTree grantee $ exerciseCmd (fst second) $ enactArg "tranche-3" [grantee]
+  (thirdNext, thirdIds) <- checkEnactment grantor "example-vesting-complete" afterSecond second
+    "tranche-3" legs (Some afterThird) thirdTree.rootEvents
+  let third = fromSome thirdNext
+  assertBalance grantee (account grantee) terms.instrumentId 75.0
+
+  setTime (e.now `addRelTime` hours 4)
+  fourthTree <- submitTree grantee $ exerciseCmd (fst third) $ enactArg "tranche-4" [grantee]
+  (_, fourthIds) <- checkEnactment grantor "example-vesting-complete" afterThird third
+    "tranche-4" legs None fourthTree.rootEvents
+  let lifecycleIds = firstIds <> secondIds <> thirdIds <> fourthIds
+  length lifecycleIds === 4
+  length (dedup lifecycleIds) === 4
+  assertBalance grantee (account grantee) terms.instrumentId 100.0
+  query @Impl.ActiveLock grantor >>= (=== [])
+  query @Impl.LockedHolding grantor >>= (=== [])
+
+  freshT0 <- getTime
+  let freshTerms = termsAt freshT0
+  fresh <- lockAccepted e.rulesA "example-vesting-expiry" freshTerms
+  setTime (freshT0 `addRelTime` hours 1)
+  let freshRemaining = freshTerms with amount = 75.0; rules = drop 1 freshTerms.rules
+  freshTree <- submitTree grantee $ exerciseCmd (fst fresh) $ enactArg "tranche-1" [grantee]
+  (freshNext, freshIds) <- checkEnactment grantor "example-vesting-expiry" freshTerms fresh
+    "tranche-1" legs (Some freshRemaining) freshTree.rootEvents
+  length freshIds === 1
+  let freshContinuation = fromSome freshNext
+  setTime freshRemaining.expiresAt
+  submitMustFail grantee $ exerciseCmd (fst freshContinuation) $ enactArg "tranche-2" [grantee]
+  checkLive grantor "example-vesting-expiry" freshRemaining freshContinuation
+  expiryTree <- submitTree grantor $ exerciseCmd (fst freshContinuation) $
+    CL.ConditionalLock_Expire [grantor] None extra
+  (_, expiryIds) <- checkEnactment grantor "example-vesting-expiry" freshRemaining freshContinuation
+    "fallback" [CL.Leg (account grantor) 75.0] None expiryTree.rootEvents
+  expiryIds === []
+  assertBalance grantor (account grantor) terms.instrumentId 75.0
+  assertBalance grantee (account grantee) terms.instrumentId 125.0
+
+-- | CIP section 4, item 5: Collateral.
+-- Pledgor locks 100.0 until t0 + 24h with an Unlock fallback. Pledgee may
+-- attest repayment and unlock, or take 100.0 on default from maturity t0 + 2h.
+-- Both parties may amend the collateral to 150.0 and maturity t0 + 6h.
+test_example_collateral : Script ()
+test_example_collateral = do
+  e <- setup ()
+  let pledgor = e.alice
+  let pledgee = e.bob
+  let defaultRule maturity amount = CL.Rule "default" [pledgee]
+        (CL.Guard_All [CL.Guard_After maturity, CL.Guard_Parties [pledgee] 1])
+        (CL.Outcome_Transfer [CL.Leg (account pledgee) amount])
+  let repaidRule = CL.Rule "repaid" [pledgee]
+        (CL.Guard_Parties [pledgee] 1) CL.Outcome_Unlock
+  let termsAt t0 = (termsFor (e with now = t0)) with
+        rules = [repaidRule, defaultRule (t0 `addRelTime` hours 2) 100.0]
+  let repaidTerms = termsAt e.now
+  -- Pledgor funds first; Pledgee separately accepts the default receiver role.
+  -- Unlock adds no receiver and requires no further acceptance from Pledgor.
+  termReceivers repaidTerms === [account pledgee]
+  repaidHandle@(repaidCid, _) <- lockAccepted e.rulesA "example-collateral-repaid" repaidTerms
+  submitMustFail pledgee $ exerciseCmd repaidCid $ enactArg "default" [pledgee]
+  checkLive pledgor "example-collateral-repaid" repaidTerms repaidHandle
+  repaidTree <- submitTree pledgee $ exerciseCmd repaidCid $ enactArg "repaid" [pledgee]
+  (_, repaidIds) <- checkEnactment pledgor "example-collateral-repaid" repaidTerms repaidHandle
+    "repaid" [CL.Leg (account pledgor) 100.0] None repaidTree.rootEvents
+  repaidIds === []
+  assertBalance pledgor (account pledgor) repaidTerms.instrumentId 100.0
+
+  defaultT0 <- getTime
+  let defaultTerms = termsAt defaultT0
+  defaultHandle@(defaultCid, _) <- lockAccepted e.rulesA "example-collateral-default" defaultTerms
+  -- Guard_After includes the exact maturity instant.
+  setTime (defaultT0 `addRelTime` hours 2)
+  defaultTree <- submitTree pledgee $ exerciseCmd defaultCid $ enactArg "default" [pledgee]
+  (_, defaultIds) <- checkEnactment pledgor "example-collateral-default" defaultTerms defaultHandle
+    "default" [CL.Leg (account pledgee) 100.0] None defaultTree.rootEvents
+  length defaultIds === 1
+  assertBalance pledgee (account pledgee) defaultTerms.instrumentId 100.0
+
+  marginT0 <- getTime
+  let marginTerms = termsAt marginT0
+  marginHandle@(marginCid, oldBacking) <- lockAccepted e.rulesA "example-collateral-margin" marginTerms
+  topUp <- mint marginTerms 50.0
+  let newMaturity = marginT0 `addRelTime` hours 6
+  let newTerms = marginTerms with
+        amount = 150.0
+        rules = [repaidRule, defaultRule newMaturity 150.0]
+  let actors = [pledgor, pledgee]
+  submitMustFail pledgor $ exerciseCmd marginCid $
+    CL.ConditionalLock_Amend newTerms [topUp] [pledgor] extra
+  submitMustFail actors $ exerciseCmd marginCid $
+    CL.ConditionalLock_Amend (newTerms with instrumentId = V2.InstrumentId e.adminA "OTHER") [topUp] actors extra
+  -- Keep the 120.0 proposal internally valid so this fails on conservation.
+  let underfundedTerms = newTerms with
+        amount = 120.0
+        rules = [repaidRule, defaultRule newMaturity 120.0]
+  submitMustFail actors $ exerciseCmd marginCid $
+    CL.ConditionalLock_Amend underfundedTerms [topUp] actors extra
+  checkLive pledgor "example-collateral-margin" marginTerms marginHandle
+  assertToken pledgor topUp marginTerms.owner marginTerms.instrumentId 50.0
+
+  marginTree <- submitTree actors $ exerciseCmd marginCid $
+    CL.ConditionalLock_Amend newTerms [topUp] actors extra
+  assertConsumed pledgor marginCid oldBacking
+  queryContractId pledgor (coerceContractId topUp : ContractId Token.Token) >>= (=== None)
+  active <- query @Impl.ActiveLock pledgor
+  case filter (\(_, lock) -> lock.state.lockId == "example-collateral-margin") active of
+    [(nextCid, nextLock)] -> do
+      let nextBacking = toInterfaceContractId nextLock.state.holdingCid : ContractId V2.Holding
+      let nextHandle = (toInterfaceContractId nextCid, nextBacking)
+      checkLive pledgor "example-collateral-margin" newTerms nextHandle
+      nextLock.state.accepted === [account pledgee]
+      Some backing <- queryInterfaceContractId pledgor nextBacking
+      backing.amount === 150.0
+      (fromSome backing.lock).expiresAt === Some newTerms.expiresAt
+      case holdingsChanges marginTree.rootEvents of
+        [changed] -> do
+          changed.admin === newTerms.instrumentId.admin
+          changed.account === account pledgor
+          changed.inputHoldingCids === [oldBacking, topUp]
+          changed.outputHoldingCids === [nextBacking]
+          changed.transferLegSides === []
+          TextMap.lookup (prefix <> "tx-kind") changed.extraArgs.meta.values === Some "lock"
+        _ -> abort "expected one owner holdings change for collateral amendment"
+    _ -> abort "expected one active amended collateral lock"
+
+-- | CIP section 4, item 6: Conditional payment.
+-- Payer locks 100.0 for Payee, who may enact pay only with Oracle attestation
+-- strictly before deadline t0 + 2h. Expiry is t0 + 24h with Unlock fallback.
+-- Oracle is a named stakeholder, has no receiver role, and never accepts.
+test_example_conditionalPayment : Script ()
+test_example_conditionalPayment = do
+  e <- setup ()
+  let payer = e.alice
+  let payee = e.bob
+  let oracle = e.arbiter
+  let termsAt t0 = (termsFor (e with now = t0)) with
+        rules = [CL.Rule "pay" [payee]
+          (CL.Guard_All [CL.Guard_Parties [oracle] 1, CL.Guard_Before (t0 `addRelTime` hours 2)])
+          (CL.Outcome_Transfer [CL.Leg (account payee) 100.0])]
+  let terms = termsAt e.now
+  termReceivers terms === [account payee]
+  assert (oracle `elem` namedParties terms)
+  paidHandle@(paidCid, _) <- lockAccepted e.rulesA "example-conditional-payment-paid" terms
+  -- Oracle can see the lock and its backing as a stakeholder without accepting.
+  checkLive oracle "example-conditional-payment-paid" terms paidHandle
+  Some active <- queryContractId oracle (coerceContractId paidCid : ContractId Impl.ActiveLock)
+  active.state.accepted === [account payee]
+  submitMustFail payee $ exerciseCmd paidCid $ enactArg "pay" [payee]
+  submitMustFail oracle $ exerciseCmd paidCid $ enactArg "pay" [oracle]
+  checkLive payer "example-conditional-payment-paid" terms paidHandle
+  let actors = [payee, oracle]
+  paidTree <- submitTree actors $ exerciseCmd paidCid $ enactArg "pay" actors
+  (_, paidIds) <- checkEnactment payer "example-conditional-payment-paid" terms paidHandle
+    "pay" [CL.Leg (account payee) 100.0] None paidTree.rootEvents
+  length paidIds === 1
+  assertBalance payee (account payee) terms.instrumentId 100.0
+
+  expiredT0 <- getTime
+  let expiredTerms = termsAt expiredT0
+  expiredHandle@(expiredCid, _) <- lockAccepted e.rulesA "example-conditional-payment-expired" expiredTerms
+  setTime (expiredT0 `addRelTime` hours 2)
+  submitMustFail actors $ exerciseCmd expiredCid $ enactArg "pay" actors
+  checkLive payer "example-conditional-payment-expired" expiredTerms expiredHandle
+  assertBalance payee (account payee) expiredTerms.instrumentId 100.0
+  setTime expiredTerms.expiresAt
+  expiredTree <- submitTree payer $ exerciseCmd expiredCid $
+    CL.ConditionalLock_Expire [payer] None extra
+  (_, expiredIds) <- checkEnactment payer "example-conditional-payment-expired" expiredTerms expiredHandle
+    "fallback" [CL.Leg (account payer) 100.0] None expiredTree.rootEvents
+  expiredIds === []
+  assertBalance payer (account payer) expiredTerms.instrumentId 100.0
