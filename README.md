@@ -95,4 +95,4 @@ The Solana proof establishes matching SHA-256 and Keccak-256 byte semantics in a
 
 The compose overlay remains pinned to Splice 0.6.7 / Canton image 0.6.8, whose participant reports Canton 3.5.4. It is **not** the current network compatibility target. The existing running stack on the development machine belongs to another checkout and was left running.
 
-For runtime compatibility checks use `test-compatibility.sh`. Use the legacy `localnet.sh` only when deliberately working on that topology; its fixed container names and ports are shared with the canton-swap layout. It requires `./scripts/init-submodules.sh` and `.env.localnet` copied from `.env.localnet.example`.
+For runtime compatibility checks use `test-compatibility.sh`. Use the legacy `localnet.sh` only when deliberately working on that topology; its fixed container names and ports are shared with the legacy overlay. It requires `./scripts/init-submodules.sh` and `.env.localnet` copied from `.env.localnet.example`.

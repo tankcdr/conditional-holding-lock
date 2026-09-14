@@ -1,7 +1,7 @@
-# Localnet overlays (canton-swap pattern)
+# Localnet overlays (legacy cn-quickstart overlay)
 
 The `localnet` submodule is `digital-asset/cn-quickstart` pinned to the same
-SHA canton-swap uses (`fe56d46`). Two kinds of change are not in that pin:
+SHA the overlay was pinned to (`fe56d46`). Two kinds of change are not in that pin:
 
 ## 1. Splice confs (`splice-0.6.7/`)
 
@@ -14,7 +14,7 @@ these files into the splice container. Delete once the submodule is bumped.
 
 `splice-app` does not contain `splice-api-token-conditional-lock-v1`.
 `scripts/localnet-bootstrap.sh` builds the DARs and `POST`s them to
-`http://localhost:3975/v2/packages`, the same HTTP upload path canton-swap
+`http://localhost:3975/v2/packages`
 uses for `id-ccse-v2`.
 
 ```bash
