@@ -1,6 +1,6 @@
-# Step 1: compilation, authority, and atomicity
+# Conditional Holding Lock: validation and runtime compatibility
 
-Evaluation date: **September 14, 2026**. Scope: the first implementation milestone in the week-of-September-14 plan. The private outreach, standards sponsorship, registry HTTP endpoints, wallet integration, and Canton Coin implementation are later work.
+Evaluation date: **September 14, 2026**. This report covers the reference interface and registry adapter: worked-example lifecycles, receiver authority, atomic settlement, event reporting, byte-domain hashing, and compatibility with the pinned Canton runtimes.
 
 ## Environment and compatibility
 
@@ -31,7 +31,7 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The normal suite has 29 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [step-1-evidence.json](step-1-evidence.json).
+The normal suite has 29 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
@@ -80,7 +80,7 @@ Seven deliberate faults were applied separately to temporary copies of the refer
 | Remove amendment funding conservation | `test_example_collateral` |
 | Report the wrong receiver side in a transfer event | `test_example_executorFreeDvp` |
 
-The `worked_example_mutations` section of [step-1-evidence.json](step-1-evidence.json) records the exact replacements, commands, and observed errors. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the adapter, and run the named script from the test package:
+The `worked_example_mutations` section of the [validation evidence](conditional-lock-validation-evidence.json) records the exact replacements, commands, and observed errors. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the adapter, and run the named script from the test package:
 
 ```bash
 cd packages/conditional-lock-test-token

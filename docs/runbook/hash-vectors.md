@@ -26,7 +26,7 @@ python3 scripts/generate-hash-vectors.py --check
 
 The normal test command fails if either generated file differs from the JSON. It also fails if Foundry or the Solana build tools are unavailable. No test downloads an unpinned Solidity library.
 
-`TestHashVectors.daml` checks both raw Daml builtins and the exact helper used by the lock implementation, including uppercase normalization and malformed input rejection. `TestConditionalLock.daml` exercises both SHA-256 and Keccak guards in actual ledger transactions. The [Step 1 report](step-1.md) describes runtime validation.
+`TestHashVectors.daml` checks both raw Daml builtins and the exact helper used by the lock implementation, including uppercase normalization and malformed input rejection. `TestConditionalLock.daml` exercises both SHA-256 and Keccak guards in actual ledger transactions. The [Conditional Holding Lock validation report](conditional-lock-validation.md) describes runtime validation.
 
 ## Solana proof
 
