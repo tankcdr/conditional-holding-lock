@@ -698,37 +698,37 @@ Written in shorthand: accounts are shown as their owning party, and `Leg` is sho
 
 ## Rationale
 
-**A release policy rather than an HTLC.** An HTLC is one rule, one receiver, and a refund; escrow, vesting, collateral, and conditional payments are the same shape with different guards and more than one outcome. Standardizing it costs a small data model and one extra choice.
+**A release policy rather than an HTLC.** Escrow, vesting, collateral, and conditional payment are an HTLC with different guards and more than one outcome. One data model covers all of them.
 
-**A closed guard set with a fixed two-level shape.** A rule is a disjunction of alternatives (`anyOf`) of conjunctions of guards (`allOf`); no arithmetic, no state, no contract references, and no deeper structure, so a wallet renders any rule as a fixed two-level list, not a recursive tree. Registries advertise limits, as CIP-0112 bounds transfer legs.
+**A closed guard set with a fixed two-level shape.** A rule is a disjunction (`anyOf`) of conjunctions (`allOf`) of leaf guards: no arithmetic, no state, no contract references, no recursion. A wallet renders a two-level list, and registries advertise limits as CIP-0112 bounds transfer legs.
 
-**Partial consumption instead of nested terms.** Firing a rule once and continuing with the remainder gives vesting and tranche release as a flat rule list, where nested successor terms would need a wallet-rendered tree.
+**Partial consumption instead of nested terms.** A rule fires once and the lock continues with the remainder, so vesting is a flat rule list rather than a tree of successor terms.
 
-**Conditions as well as executors.** Counterparties as their own executors is the right answer for delivery versus payment, and CIP-0112 already lets trading parties fill that role inside the allocation model. What it cannot answer is what must be true for funds to move when the answer is not a party: a preimage, or a point in ledger time. Where the decision does belong to a party, `Guard_Parties` names it and the outcome bounds its discretion to a receiver set fixed in the terms, which settling does not.
+**Conditions as well as executors.** CIP-0112 already lets counterparties act as their own executors, which settles delivery versus payment. It cannot express a release that depends on a fact rather than a party: a preimage, or a point in ledger time. Where a party does decide, `Guard_Parties` names it and the outcome bounds its discretion to a receiver set fixed in the terms.
 
-**Atomicity instead of cross-lock guards.** Two locks enacted in one Canton transaction commit or fail together, so a guard on another lock's state would add nothing. Allocations rely on the same property, which CIP-0112 assigns to the executors and each admin.
+**Atomicity instead of cross-lock guards.** Two locks enacted in one transaction commit or fail together, so a guard on another lock's state adds nothing.
 
-**Expiry always unlocks.** A directed outcome on expiry is better written as an ordinary rule, `Guard_After` naming the beneficiary with `expiresAt` as the safety valve after it; a dedicated expiry outcome would name the wrong actor and remove that valve. This matches CIP-0112, where expiry, withdrawal, and cancellation only ever release funds to the authorizer.
+**Expiry always unlocks.** A directed outcome on expiry is an ordinary `Guard_After` rule naming the beneficiary, with `expiresAt` as the safety valve behind it. In CIP-0112, expiry, withdrawal, and cancellation likewise only return funds to the authorizer.
 
-**One release outcome.** A fixed-legs and a discretionary outcome cannot together express a fixed fee plus a discretionary remainder without letting the discretionary party pay itself the whole balance. `Outcome_Release` merges them under one conservation check: `receivers = []` is the fixed case, `fixedLegs = []` the discretionary case, and both non-empty the fee-plus-award case, while still letting the enactor release `fixedLegs` alone and leave the remainder to expire (Security Considerations, "Enactor discretion"). This is the shape CIP-0112 allocations already use, legs fixed at authorization and supplied at execution against one budget.
+**One release outcome.** `Outcome_Release` carries fixed legs and a bounded discretionary part under one conservation check, so a fixed fee plus a discretionary award is one rule. The enactor may still release the fixed legs alone (Security Considerations, "Enactor discretion"). CIP-0112 allocations use the same shape: legs fixed at authorization, legs supplied at execution, one budget.
 
-**A new package rather than a change to `splice-api-token-holding-v2`.** Adding choices to `Holding` would break every existing implementation. A separate package follows the CIP-0112 evolution model: registries opt in, wallets discover support through `supportedApis`, and the on-ledger footprint is the existing `Lock` view.
+**A new package rather than a change to `splice-api-token-holding-v2`.** Adding choices to `Holding` would break every implementation. A separate package follows the CIP-0112 evolution model: registries opt in, wallets discover support through `supportedApis`, and the on-ledger footprint is the existing `Lock` view.
 
-**What a registry must implement.** The package requires three interfaces and the holding representation of section 3.4, the `Lock` view CIP-0056 already defines; every registry that already implements CIP-0112 can implement this package at the same Daml-LF target. Every guard kind and every outcome is mandatory for any registry advertising `splice-api-token-conditional-lock-v1`; only the numeric limits of section 3.8 are registry-specific.
+**What a registry must implement.** Three interfaces and the holding representation of section 3.4, which is the `Lock` view CIP-0056 already defines. Any registry that implements CIP-0112 can implement this package at the same Daml-LF target. Every guard kind and outcome is mandatory; only the numeric limits of section 3.8 are registry-specific.
 
-**Approvals.** Creating a receiver holding requires the receiver's authority, exactly as for transfers, and registries MAY require an account's provider to authorize alongside its owner. The instruction step names accounts whose approval is outstanding and reports who may act through `availableActions`.
+**Approvals.** Creating a receiver holding requires the receiver's authority, as for transfers, and a registry MAY also require the account's provider. The instruction names the accounts whose approval is outstanding and reports who may act through `availableActions`.
 
-**Byte-domain hashing.** `DA.Text.sha256` hashes UTF-8 text; `DA.Crypto.Text.sha256` and `keccak256` hash the decoded bytes of a hex string, and only the latter is compatible with hashlocks on external chains, so the specification fixes the preimage at 32 bytes of hex and the digest domain at raw bytes; lowercasing removes hex case malleability. Both algorithms are mandatory: SHA-256 is the common denominator across Bitcoin, Lightning, and EVM HTLC implementations, and Keccak-256 is what EVM-native counterparties emit by default.
+**Byte-domain hashing.** `DA.Text.sha256` hashes UTF-8 text; `DA.Crypto.Text.sha256` and `keccak256` hash the decoded bytes of a hex string, which is what external-chain hashlocks compute. The preimage is therefore 32 bytes of hex, lowercased, and both algorithms are mandatory: SHA-256 for Bitcoin, Lightning, and EVM HTLCs, Keccak-256 for EVM-native counterparties.
 
-**Relation to CIP-0105 and CIP-0116.** Those CIPs require Canton Coin locked per PartyId for Super Validator weight and Featured App eligibility, with vesting-based unlock schedules, and are orthogonal since this CIP is registry-agnostic with no governance semantics. A Canton Coin implementation would reuse `LockedAmulet` mechanics without touching DSO governance.
+**Relation to CIP-0105 and CIP-0116.** Those CIPs lock Canton Coin per PartyId for Super Validator weight and Featured App eligibility. This CIP is registry-agnostic and has no governance semantics; a Canton Coin implementation would reuse `LockedAmulet` mechanics without touching DSO governance.
 
 **Alternatives considered.**
 
-- Application-owned escrow templates that take title to the asset: funds leave the authorizer's portfolio and tax/custody treatment changes; CIP-0105 requires locking to work from self-custody and custodial wallets alike.
-- Committed allocations with the counterparty as executor: right for a trade whose legs are known or chosen at settlement, not a signatory-checked release condition, multiple outcomes, or amounts bounded by a fixed receiver set.
+- Application-owned escrow templates: funds leave the authorizer's portfolio and change tax and custody treatment; CIP-0105 requires locking to work from self-custody and custodial wallets alike.
+- Committed allocations with the counterparty as executor: right for a trade with known or settlement-chosen legs; no fact-checked release, no second outcome, no receiver bound on discretion.
 - `TransferPreapproval` plus off-ledger coordination: no on-ledger enforcement of the condition or the expiry.
-- Registry-specific lock contracts such as `LockedAmulet`: correct for one registry, unusable across registries, and not condition-aware.
-- Cross-lock guards and oracle-data guards: unnecessary given atomic enactment and `Guard_Parties`; deferred.
+- Registry-specific lock contracts such as `LockedAmulet`: correct for one registry, unusable across registries, not condition-aware.
+- Cross-lock and oracle-data guards: unnecessary given atomic enactment and `Guard_Parties`; deferred.
 
 ## Backwards Compatibility
 
