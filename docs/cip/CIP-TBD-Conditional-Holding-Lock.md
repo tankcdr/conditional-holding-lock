@@ -17,8 +17,6 @@
 
 This CIP adds one interface package to the Canton Network Token Standard, `splice-api-token-conditional-lock-v1`, letting a `Holding`'s holder attach a release policy to it: a set of rules, each pairing a condition with an outcome, unlock to the authorizer or release to fixed legs plus bounded discretion. A rule fires at most once and may consume part of the amount, leaving the remainder locked until expiry, when it only unlocks to the authorizer. The authorizer and every named party can cancel or amend the lock by unanimous consent.
 
-This draft is posted to establish the need and collect use cases, not to commit the ecosystem to an API set next cycle. The interface below is a strawman, posted so "is this expressible today?" can be answered against something concrete. Registries, wallets, and venues are asked on cip-discuss whether they need this primitive; scope follows from those answers.
-
 The package defines a factory, a two-step approval instruction, the lock interface (`Enact`, `Expire`, `Cancel`, `Amend`), the holding representation while locked, event reporting through the CIP-0112 `EventLog`, and off-ledger registry endpoints. It modifies no existing package: any registry can implement it, and any V1 or V2 wallet already renders the locked holding correctly.
 
 ## Motivation
@@ -39,7 +37,7 @@ The token standard describes locks but does not let anyone create one. `Holding.
 
 ### What token standard V2 already covers
 
-Token standard V2 (CIP-0112) allocations cover more of this ground than a reading of them as venue settlement suggests, and this CIP does not propose to re-cover any of it.
+Token standard V2 (CIP-0112) allocations already cover the following, and this CIP does not re-cover them.
 
 **Counterparties as their own executors.** `SettlementInfo.executors` is a party list configured per settlement, not a fixed third-party role, per CIP-0112 "Configurable Executors and Batch Settlement via SettlementFactory". A delivery versus payment between two counterparties, with both as the executors, needs no third party and works across registries. Same-ledger and cross-registry DvP without a venue is a V2 feature today.
 
@@ -53,15 +51,13 @@ None of these needs a conditional lock, and this CIP is not an alternative to an
 
 ### What token standard V2 cannot express
 
-These five are the case for the CIP; each is a capability, not a criticism.
-
 1. **Release conditioned on a fact the lock's signatories check, rather than on a party acting.** A preimage or a point in ledger time is checked by the signatories at release, not decided by a party. An allocation's `settlementDeadline` only bounds when parties may act, never itself releasing anything.
 2. **More than one outcome over the same locked funds.** A lock carries a list of rules over one pool of funds, each with its own guard and outcome. Per CIP-0112 "Committed Allocations for Prefunded Trading and Iterated Settlement", an allocation authorizes one settlement whose legs the executors may re-choose, not alternative outcomes.
 3. **Discretion over amounts bounded by the terms, not by the settlement role.** A lock can give amount discretion to a party with no other power over the funds, gated on a guard and bound to a receiver list fixed at creation. In an allocation, only the executor set chooses amounts, and its receivers (`TransferLegSide.otherside`) are supplied at settlement, not declared in the allocation.
 4. **Partial consumption governed by the rule that fired.** A lock's continuation is determined by the rule that fired: it consumes exactly the legs released and continues without that rule (section 3.6). Per CIP-0112 "Committed Allocations for Prefunded Trading and Iterated Settlement", an allocation's iterated settlement instead returns the change to a new allocation whose split the executors choose.
 5. **Amendment by unanimous consent.** `Amend` replaces the terms with the consent of the authorizer and every named party, adjusting the locked amount and requiring newly introduced receivers to act in the same transaction (section 3.6). Per CIP-0112 "Topping up Allocations", executors may rebalance a committed allocation's funding, but the authorizer cannot alter the legs or deadline, and funding changes are the executors' to make, not the affected parties'.
 
-Canton expresses this more cleanly than an account-model chain: a lock is an attribute of the holding, so funds never leave the authorizer's portfolio, and release paths are pre-authorized at creation so a receiver or arbiter can enact without the authorizer's signature. What this CIP proposes is that the pattern be standard.
+Canton expresses this more cleanly than an account-model chain: a lock is an attribute of the holding, so funds never leave the authorizer's portfolio, and release paths are pre-authorized at creation so a receiver or arbiter can enact without the authorizer's signature.
 
 ## Specification
 
@@ -718,7 +714,7 @@ Written in shorthand: accounts are shown as their owning party, and `Leg` is sho
 
 **A new package rather than a change to `splice-api-token-holding-v2`.** Adding choices to `Holding` would break every existing implementation. A separate package follows the CIP-0112 evolution model: registries opt in, wallets discover support through `supportedApis`, and the on-ledger footprint is the existing `Lock` view.
 
-**What a registry must implement.** The package requires three interfaces and the holding representation of section 3.4, the `Lock` view CIP-0056 already defines; every registry that already implements CIP-0112 can implement this package at the same Daml-LF target. An optional API implemented in parts would be worth less than none, which is why every guard kind and outcome is mandatory for any registry advertising `splice-api-token-conditional-lock-v1`, with only the numeric limits of section 3.8 left to the registry.
+**What a registry must implement.** The package requires three interfaces and the holding representation of section 3.4, the `Lock` view CIP-0056 already defines; every registry that already implements CIP-0112 can implement this package at the same Daml-LF target. Every guard kind and every outcome is mandatory for any registry advertising `splice-api-token-conditional-lock-v1`; only the numeric limits of section 3.8 are registry-specific.
 
 **Approvals.** Creating a receiver holding requires the receiver's authority, exactly as for transfers, and registries MAY require an account's provider to authorize alongside its owner. The instruction step names accounts whose approval is outstanding and reports who may act through `availableActions`.
 
@@ -740,7 +736,7 @@ The CIP is additive. No existing package, interface, choice, or off-ledger endpo
 
 ## Reference Implementation
 
-An Apache-2.0 reference implementation exists today, out of tree, taken as a dependency by any registry or application trying the primitive before it is part of Splice. At the time of this revision it implements the round-one shape and is being updated to the interface specified here; the repository tracks this document.
+An Apache-2.0 reference implementation exists today, out of tree, taken as a dependency by any registry or application trying the primitive before it is part of Splice. It currently implements the previous revision of this interface and is being updated to this one.
 
 1. The `splice-api-token-conditional-lock-v1` package, with Daml Script tests covering the interface's MUSTs, hashlock vectors shared with an EVM reference contract, and a named script per worked example (section 4).
 2. An implementation over `TestTokenV2`, showing a V2 registry can support the interface unchanged, discoverable per instrument through `supportedApis`.
@@ -754,7 +750,7 @@ What is not done, and what this CIP does not schedule, is the work that belongs 
 - wallet parsing and display of the lock, enactment, expiry, cancel, and amend events;
 - a Canton Coin implementation: a sibling template embedding the same `TimeLock` representation `LockedAmulet` uses, a `ConditionalLockFactory` on `ExternalPartyAmuletRules` so externally signed parties (CIP-0103) can lock, enact, and expire within the CIP-0107 submission delay, the Amulet holding fee netted from enacted legs, a DSO cleanup path analogous to `LockedAmulet_ExpireAmulet`, and a `min-duration` of at least 24 hours.
 
-Those follow if and when the maintainers schedule them, and they are the work required before this CIP could move to Final.
+Those follow when the maintainers schedule them and are required before this CIP can move to Final.
 
 ## Security Considerations
 
