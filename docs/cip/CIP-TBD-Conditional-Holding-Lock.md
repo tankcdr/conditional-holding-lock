@@ -783,7 +783,6 @@ This draft seeks to find out whether the primitive is needed and, if so, in what
 ## Changelog
 
 2026-09-10 - Initial draft.
-2026-09-16 - Round two after review of canton-network/splice PR 7294: flattened guards (`Rule.anyOf`); renamed `owner` to `authorizer` (`LockTerms.authorizer`); `Expire` always unlocks (`ConditionalLock_Expire`); merged release outcomes (`Outcome_Release`); added `Leg.legId`/`Leg.meta`; generalized acceptance (`pendingApprovals`, `availableActions`); attributed guard checking to signatories (section 3.3); added `lockId` to `ConditionalLockInstructionView`. Added a view budget (3.9), `Amend` semantics (3.6), an escrowed DvP worked example, a reframed Motivation, a restated Reference Implementation, and Questions for the Community.
 
 ## Copyright
 
