@@ -609,40 +609,25 @@ Registries MUST support all guard kinds, at least eight alternatives per rule an
 
 #### 3.6 Outcome enactment and continuation
 
-On `Enact` of rule `r` with remaining amount `a`:
+On `Enact` of rule `r` with remaining amount `a`, `Outcome_Unlock` returns `a` to the authorizer unlocked and terminates the lock. `Outcome_Release` releases `fixedLegs` plus the supplied `legs` under the constraints stated on `Outcome_Release` and `ConditionalLock_Enact.legs`; if the total is less than `a`, the lock continues with `a` minus the total and `terms.rules` minus `r`, otherwise it terminates. A leg to `terms.authorizer` is an unlock.
 
-- `Outcome_Unlock`: `a` returns to the authorizer unlocked; the lock terminates.
-- `Outcome_Release`: `fixedLegs` are released in full whenever the rule fires; the enactor-supplied `legs` MUST each name a receiver in `receivers` and MUST be empty when `receivers` is empty. The total released, `fixedLegs` plus the supplied `legs`, MUST be positive and at most `a`; if less, the lock continues with amount `a` minus the total released and rules `terms.rules` minus `r`, otherwise it terminates. A leg whose receiver is `terms.authorizer` returns that amount unlocked rather than transferring it.
+`Expire` returns the remaining amount to the authorizer unlocked and terminates the lock; its actors are as stated on `ConditionalLock_Expire`. Registries MUST NOT fail an `Expire` for reasons attributable to any party other than the authorizer.
 
-`Expire` returns the full remaining amount to the authorizer, unlocked, and terminates the lock without creating a continuation. Its actors are either the parties the registry requires to unlock the authorizer account or, where the registry permits admin-only cleanup, the admin alone; funds can only return to the authorizer. Registries MUST NOT fail an `Expire` for reasons attributable to any party other than the authorizer.
+Creating a receiver holding is a transfer, so the registry's transfer rules (allow lists, pause status, provider controls) apply and registries MAY fail an enactment on them. Conservation is checked against the terms; registries whose holdings carry fees MAY deliver reduced amounts and MUST report the deduction in the result `meta`.
 
-Creation of receiver holdings is a transfer: registry rules that apply to transfers into the receiver account (allow lists, pause status, account provider controls) apply to enactment, and registries MAY fail an enactment for those reasons.
+`Cancel` and `Amend` are authorized and validated as stated on their choices. In addition, `Amend` MUST NOT reduce the locked amount (partial release is `Enact`, full release is `Cancel`), and checking against `terms.amount` rather than the holding balance keeps fee decay out of the rule; `newTerms.requestedAt` MUST be in the past and SHOULD be the amendment's timestamp. Every successful choice archives the lock and its backing holdings and creates a continuation when funds remain (section 3.3); the continuation keeps `lockId` and `enactedRuleIds`.
 
-Conservation is checked against the terms: registries whose holdings carry fees MAY deliver reduced amounts and MUST report the deduction in the result `meta`.
-
-`Cancel` requires the parties the registry requires to move funds out of the authorizer account plus every named party of the current terms.
-
-`Amend` replaces the terms of an active lock in one transaction, optionally adding funds; its authorization and validation constraints are as stated on `ConditionalLock_Amend.newTerms`, `additionalInputHoldingCids`, and `actors` above, and additionally:
-
-- `Amend` MUST NOT reduce the locked amount: partial release is `Enact`, full release is `Cancel`. Checking against `terms.amount`, a stated quantity, rather than the holding's current balance, means holding-fee decay does not affect the rule.
-- `newTerms.requestedAt` MUST be in the past and SHOULD be the wallet's timestamp for the amendment rather than the original lock.
-- On success the lock and its backing holdings are archived and a continuation lock and backing holdings are created, as for every other choice in section 3.3; the continuation retains `lockId` and the set of enacted rule ids.
-
-All time comparisons use ledger time. Registries SHOULD allow holdings whose lock has expired as inputs to transfers, per the `Holding.lock` doc comment in `splice-api-token-holding-v2`, so `Expire` can be combined with use in one transaction.
+All time comparisons use ledger time. Registries SHOULD accept holdings whose lock has expired as transfer inputs, per the `Holding.lock` doc comment in `splice-api-token-holding-v2`, so `Expire` can be combined with use in one transaction.
 
 #### 3.7 Event reporting
 
-V2 registries MUST report every holdings change caused by these choices through `EventLog_HoldingsChange` (CIP-0112 "EventLog for Transaction Parsing"):
+V2 registries MUST report every holdings change these choices cause through `EventLog_HoldingsChange` (CIP-0112 "EventLog for Transaction Parsing"). Creation, approval, amendment, expiry, cancellation, and legs to `terms.authorizer` are holdings changes on `terms.authorizer` with no transfer leg. Each enacted leg to another receiver is a holdings change on `terms.authorizer` and one on the receiver, each carrying a `TransferLegSide` with the identifier `<lockId>/<ruleId>/<legId>` and the leg's `meta`.
 
-- lock creation, approval, and amendment: a holdings change on `terms.authorizer` with no transfer leg;
-- enactment: for each leg whose receiver is not `terms.authorizer`, a holdings change on `terms.authorizer` and one on the receiver, each carrying one `TransferLegSide` for that leg, sharing the identifier `<lockId>/<ruleId>/<legId>` and the leg's `meta`. A leg whose receiver is `terms.authorizer` is a holdings change with no transfer leg, as below;
-- expiry and cancellation: a holdings change on `terms.authorizer` with no transfer leg.
+A leg's two sides MUST share an identifier and distinct legs, including across enactments, MUST have distinct ones, as CIP-0112 requires; `lockId`, `Rule.id`, and `Leg.legId` MUST be non-empty and MUST NOT contain `/`. The registry issues `lockId` at instruction (section 3.2); it MUST be distinct per lock and MUST remain stable across approvals, continuations, and amendments. Because a rule id fires at most once per `lockId` and leg ids are unique within an enactment, the three components suffice.
 
-The two sides of a leg MUST share an identifier; distinct legs, including across enactments, MUST have distinct identifiers, as CIP-0112 requires. `lockId`, `Rule.id`, and `Leg.legId` MUST be non-empty and MUST NOT contain `/`; the registry issues `lockId` when instructed (section 3.2), and it MUST be distinct per lock and MUST remain stable across approvals, continuations, and amendments. Since a rule id fires at most once per `lockId` and leg ids are unique within an enactment, `<lockId>/<ruleId>/<legId>` is already unique.
+`TransferLegSide.meta` MUST contain every key of `Leg.meta`. `Leg.meta` MUST NOT set `splice.lfdecentralizedtrust.org/tx-kind`, `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`, or any other reserved key under `splice.lfdecentralizedtrust.org/conditional-lock/`, and registries MUST reject such terms at creation and amendment. `splice.lfdecentralizedtrust.org/reason` on a leg is not reserved and labels the leg for wallets.
 
-`TransferLegSide.meta` MUST contain every key of the corresponding `Leg.meta`. `Leg.meta` MUST NOT set `splice.lfdecentralizedtrust.org/tx-kind`, `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`, or any other reserved key under `splice.lfdecentralizedtrust.org/conditional-lock/`; registries MUST reject terms where any `Leg.meta` sets one, at creation and at amendment. `splice.lfdecentralizedtrust.org/reason` on a leg is not reserved and is the wallet-visible way to label an individual leg, e.g. a tranche number or an arbiter's fee.
-
-For CIP-0056 transaction parsers, choice-result and holding `meta` MUST carry `splice.lfdecentralizedtrust.org/tx-kind`: `lock` for creation, approval, and amendment; `transfer` for enactments creating receiver holdings; `unlock` for unlock outcomes, cancellation, and expiry. Enactment results MUST carry `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`. `splice.lfdecentralizedtrust.org/reason` SHOULD be set on reject, withdraw, cancel, expire, and amend.
+Choice-result and holding `meta` MUST carry `splice.lfdecentralizedtrust.org/tx-kind`: `lock` for creation, approval, and amendment; `transfer` for enactments creating receiver holdings; `unlock` for unlocks, cancellation, and expiry. Enactment results MUST carry `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`. `splice.lfdecentralizedtrust.org/reason` SHOULD be set on reject, withdraw, cancel, expire, and amend.
 
 #### 3.8 Registry limits and off-ledger API
 
