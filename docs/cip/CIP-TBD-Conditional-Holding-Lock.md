@@ -736,21 +736,7 @@ The CIP is additive. No existing package, interface, choice, or off-ledger endpo
 
 ## Reference Implementation
 
-An Apache-2.0 reference implementation exists today, out of tree, taken as a dependency by any registry or application trying the primitive before it is part of Splice. It currently implements the previous revision of this interface and is being updated to this one.
-
-1. The `splice-api-token-conditional-lock-v1` package, with Daml Script tests covering the interface's MUSTs, hashlock vectors shared with an EVM reference contract, and a named script per worked example (section 4).
-2. An implementation over `TestTokenV2`, showing a V2 registry can support the interface unchanged, discoverable per instrument through `supportedApis`.
-3. The registry OpenAPI file `conditional-lock-v1.yaml`.
-4. Executable proofs of the interface's claims: byte-domain hashing against shared SHA-256/Keccak-256 vectors, receiver authorization persisting to enactment time, one-step locking, and atomic settlement of two locks on two registries.
-
-What is not done, and what this CIP does not schedule, is the work that belongs to the Splice maintainers:
-
-- adding the package to the `token-standard` directory;
-- extending `TestTokenV2` in the Splice tree with conformance tests in the token standard suite;
-- wallet parsing and display of the lock, enactment, expiry, cancel, and amend events;
-- a Canton Coin implementation: a sibling template embedding the same `TimeLock` representation `LockedAmulet` uses, a `ConditionalLockFactory` on `ExternalPartyAmuletRules` so externally signed parties (CIP-0103) can lock, enact, and expire within the CIP-0107 submission delay, the Amulet holding fee netted from enacted legs, a DSO cleanup path analogous to `LockedAmulet_ExpireAmulet`, and a `min-duration` of at least 24 hours.
-
-Those follow when the maintainers schedule them and are required before this CIP can move to Final.
+An Apache-2.0 reference implementation is at https://github.com/tankcdr/conditional-holding-lock: the `splice-api-token-conditional-lock-v1` package, an implementation over the published `TestTokenV2` package, the registry OpenAPI file, and Daml Script proofs of the interface's properties, including byte-domain hash vectors shared with EVM and Solana reference programs. It can be taken as a dependency by any registry or application. It currently implements the previous revision of this interface and is being updated to this one. Adding the package to the Splice `token-standard` directory, extending `TestTokenV2` in the Splice tree, wallet support, and a Canton Coin implementation follow when the maintainers schedule them and are required before this CIP can move to Final.
 
 ## Security Considerations
 
