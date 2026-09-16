@@ -6,7 +6,7 @@ This repository provides the interface package, an adapter over the published Te
 
 ## Worked examples
 
-The Development Fund proposal's M1 promise of Daml Script tests for all six CIP section 4 worked examples maps to the scripts in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 29 Daml Scripts, including the 23 mechanics proofs.
+Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 29 Daml Scripts, including the 23 mechanics proofs.
 
 | CIP section 4 example | Named script | Mechanics proofs it relies on |
 | --- | --- | --- |

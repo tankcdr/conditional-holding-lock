@@ -46,7 +46,7 @@ Additional proofs cover account-provider acceptance, sequential acceptance by mu
 
 ## Worked-example coverage
 
-The Development Fund proposal's M1 promise of Daml Script tests for all six CIP section 4 worked examples maps to [TestWorkedExamples.daml](../../packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each named script combines the specified successful and rejected steps with holdings, lock-continuation, and V2 event assertions.
+Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](../../packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each named script combines the specified successful and rejected steps with holdings, lock-continuation, and V2 event assertions.
 
 | CIP section 4 example | Named script | Mechanics proofs it relies on |
 | --- | --- | --- |
