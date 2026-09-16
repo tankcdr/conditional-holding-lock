@@ -770,16 +770,6 @@ Those follow if and when the maintainers schedule them, and they are the work re
 - **Privacy.** Digests, receivers, named parties, and lock context are visible to the lock's stakeholders and, through `Lock.context`, potentially to account providers. Wallets SHOULD keep `context` generic.
 - **Authorization.** Enactment never requires the authorizer at enactment time; authority was granted at lock creation. Every choice's `actors` MUST be checked by implementations (section 3), and registries MUST ensure no path moves locked funds other than the four choices and the expiry cleanup.
 
-## Questions for the Community
-
-This draft seeks to find out whether the primitive is needed and, if so, in what shape; replies on cip-discuss should decide whether it proceeds.
-
-1. **Which guards do you actually need?** The draft fixes a closed set: a hash preimage, ledger time before and after a point, and a threshold of named parties. Is any of these unnecessary for your use case? Is anything missing that the lock's signatories could check at enactment without reference to another contract or off-ledger data?
-2. **Which outcomes do you actually need?** The draft offers return to the authorizer, release to legs fixed in the terms, and amounts chosen at release within a fixed receiver set. Does your use case need all three, or is bounded discretion unnecessary and fixed legs enough?
-3. **Would you adopt an out-of-tree package before it is in Splice?** The interface package and an implementation over `TestTokenV2` exist today under Apache-2.0 and can be taken as a dependency now. Would your registry, wallet, or application depend on them ahead of a Splice release, and what would you need to be willing to: a stable package id, a version policy, conformance tests, something else?
-4. **Where does this rank against digesting V2?** V2 is a large change and the ecosystem is still absorbing it. Is a conditional lock something you want now, once V2 has settled, or solved another way?
-5. **Who would sponsor it?** Standards-track work needs someone to carry it and maintainers willing to schedule the Splice and Canton Coin work. If you would sponsor, co-author, implement, or pilot it, say so on the thread.
-
 ## Changelog
 
 2026-09-10 - Initial draft.
