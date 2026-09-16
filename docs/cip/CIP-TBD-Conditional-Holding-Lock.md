@@ -37,9 +37,9 @@ The token standard describes locks but does not let anyone create one. `Holding.
 
 **Conditional payment on attestation.** Payment released to the payee when a named attestor acts, and only before a deadline. *Who needs it:* invoice financing, parametric insurance, and milestone payments, and any registry asked to support "pay on proof of delivery" without becoming a party to the delivery.
 
-### What V2 already covers
+### What token standard V2 already covers
 
-CIP-0112 allocations cover more of this ground than a reading of them as venue settlement suggests, and this CIP does not propose to re-cover any of it.
+Token standard V2 (CIP-0112) allocations cover more of this ground than a reading of them as venue settlement suggests, and this CIP does not propose to re-cover any of it.
 
 **Counterparties as their own executors.** `SettlementInfo.executors` is a party list configured per settlement, not a fixed third-party role, per CIP-0112 "Configurable Executors and Batch Settlement via SettlementFactory". A delivery versus payment between two counterparties, with both as the executors, needs no third party and works across registries. Same-ledger and cross-registry DvP without a venue is a V2 feature today.
 
@@ -51,7 +51,7 @@ CIP-0112 allocations cover more of this ground than a reading of them as venue s
 
 None of these needs a conditional lock, and this CIP is not an alternative to any of them.
 
-### What V2 cannot express
+### What token standard V2 cannot express
 
 These five are the case for the CIP; each is a capability, not a criticism.
 
