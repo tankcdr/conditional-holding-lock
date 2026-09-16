@@ -27,7 +27,7 @@ The token standard describes locks but does not let anyone create one. `Holding.
 
 ### The use cases
 
-**HTLC legs against Bitcoin and EVM chains.** A hash time-locked contract on an external chain is atomic only if the Canton leg releases on the same preimage, checked on-ledger. *Who needs it:* market makers and bridge operators quoting a Canton instrument against BTC or an ERC-20, and the registries whose instruments they quote; today the Canton side uses a registry-specific contract or an off-ledger release, not that condition.
+**Cross-chain legs.** A hash time-locked swap is atomic only if the Canton leg releases on the same preimage the other chain checks. *Who needs it:* market makers and bridge operators quoting a Canton instrument against an asset on Bitcoin, an EVM chain, or Solana, and the registries they quote; today the Canton side is a registry-specific contract or an off-ledger release.
 
 **Escrow with a decision-maker.** Funds are locked by one party and awarded, in whole or part, by a named arbiter who is neither counterparty. *Who needs it:* marketplaces, freelance and RWA platforms, and dispute-resolution services, which today take title into an application-owned template, losing the holder's portfolio view.
 
