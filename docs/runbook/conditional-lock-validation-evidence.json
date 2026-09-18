@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-14T19:25:32.614314+00:00",
+  "checked_at": "2026-09-19T00:07:54.222422+00:00",
   "source_verification": {
-    "checked_at": "2026-09-11T14:32:12.233188+00:00",
+    "checked_at": "2026-09-18T23:55:32.206188+00:00",
     "splice_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
     "networks": {
       "mainnet": {
-        "splice": "0.7.4",
-        "canton": "3.5.14",
+        "splice": "0.7.5",
+        "canton": "3.5.15",
         "sdk": "3.5.2"
       },
       "testnet": {
-        "splice": "0.7.5",
-        "canton": "3.5.15",
+        "splice": "0.8.0",
+        "canton": "3.5.16",
         "sdk": "3.5.2"
       }
     },
@@ -48,13 +48,18 @@
         "matches_pin": true
       }
     ],
-    "drift": []
+    "drift": [
+      "mainnet.splice: expected 0.7.4, live 0.7.5",
+      "mainnet.canton: expected 3.5.14, live 3.5.15",
+      "testnet.splice: expected 0.7.5, live 0.8.0",
+      "testnet.canton: expected 3.5.15, live 3.5.16"
+    ]
   },
   "ide_ledger": {
     "sdk": "3.5.2",
     "java": "21.0.12.1",
-    "passed": 29,
-    "checked_at": "2026-09-14T19:20:24.978506+00:00",
+    "passed": 60,
+    "checked_at": "2026-09-18T23:54:49.281443+00:00",
     "command": "./scripts/test.sh"
   },
   "evm": {
@@ -62,14 +67,14 @@
     "solc": "0.8.24",
     "shared_vectors": 6,
     "passed": [
-      "test_sha256_bytes32_vectors",
-      "test_keccak256_bytes32_vectors"
+      "test_keccak256_bytes32_vectors",
+      "test_sha256_bytes32_vectors"
     ],
-    "checked_at": "2026-09-14T19:20:24.978506+00:00"
+    "checked_at": "2026-09-18T23:54:49.281443+00:00"
   },
   "runtimes": [
     {
-      "checked_at": "2026-09-14T19:22:54.206793+00:00",
+      "checked_at": "2026-09-18T23:59:59.051941+00:00",
       "network_runtime": "mainnet",
       "execution": "local Canton OSS, single participant and synchronizer, static time, real Ledger API",
       "splice_version_reference": "0.7.4",
@@ -80,54 +85,85 @@
       "artifacts": [
         {
           "package": "splice-api-token-conditional-lock-v1",
-          "package_id": "9e362fc605d36864ee08d69ef95db6937ab8f920419874f37951cc3a40105c30",
-          "dar_sha256": "dae3a99d0c36da263297f5a785afd7f14af003482ce705d1fa4ccb58b7612a97"
+          "package_id": "cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac",
+          "dar_sha256": "419aea6ca1a7308fc2622ed81d6d5f8f08ac29d293f10c730b6552096bcaf3eb"
         },
         {
           "package": "conditional-lock-test-token",
-          "package_id": "835b9dbe48f386029b327a460a29f0d176fafb768ba93d6f1d8ea3ec94f1835f",
-          "dar_sha256": "da74016a6a8facbc252ca350c20042f1103eb2ea13dd16f0290148d97fdf214b"
+          "package_id": "4cdb5f490003178fe5458e3ec86331f5417fec83ab4a15b9bb5e7d7cb5615097",
+          "dar_sha256": "ec5519eb7a8671f95db922ef36c012549084701148d2475f2ef32e1a065ba216"
         },
         {
           "package": "conditional-lock-test",
-          "package_id": "e792b0aab0931161b3ad2eee5d7fa967556e8f5ef43617661c0618c1c1c9c48d",
-          "dar_sha256": "13add76ea91d3136832553b1c7ba2d3fdc98fb45d29271c7f02e912d58172e5f"
+          "package_id": "be31ae90b1e91c5ee1ff58a1cfa55206f9aa03d7599dcbb13c7604ba5f171e92",
+          "dar_sha256": "cdfd2471f1c55ac1d375bb34f76844ae02f306316203e2178f7da4ac7ce64a88"
         }
       ],
       "passed": [
+        "TestApprovals:test_authorizerProviderMustApproveLockCreation",
+        "TestApprovals:test_availableActionsReportsAcceptGroups",
+        "TestApprovals:test_availableActionsShrinksOnApproval",
+        "TestApprovals:test_lockAvailableActionsPerRule",
+        "TestApprovals:test_lockSignatoriesAreTheAdminAuthorizerAndApprovers",
         "TestConditionalLock:test_amendCannotChangeAssetOrResurrectSpentRules",
-        "TestConditionalLock:test_amendTopUpAndNewReceiverAcceptance",
+        "TestConditionalLock:test_amendTopUpAndNewApproverAcceptance",
+        "TestConditionalLock:test_approverAuthorityPersistsAndAuthorizerDoesNotEnact",
+        "TestConditionalLock:test_approverProviderAuthorityIsCapturedAtAcceptance",
         "TestConditionalLock:test_atomicDvpAcrossTwoTestTokenV2Registries",
         "TestConditionalLock:test_atomicDvpRollsBackFirstEnactWhenSecondFails",
         "TestConditionalLock:test_cancelRequiresEveryNamedParty",
-        "TestConditionalLock:test_distributeIsBoundedToReceiversAndRemainingAmount",
         "TestConditionalLock:test_enactorAndThresholdCannotBeSpoofed",
-        "TestConditionalLock:test_expiryBoundaryAndOwnerOnlyRefund",
+        "TestConditionalLock:test_expiredBackingCannotBeSpentByTheOrdinaryTokenPath",
+        "TestConditionalLock:test_expiryBoundaryAndAuthorizerOnlyRefund",
+        "TestConditionalLock:test_guardsUseInclusiveAfterAndExclusiveBefore",
         "TestConditionalLock:test_keccakWitnessIsNormalizedAndCannotSubstituteSha256",
         "TestConditionalLock:test_malformedTermsAndFundingFailWithoutConsumingInputs",
-        "TestConditionalLock:test_multipleReceiversAcceptInSeparateTransactions",
-        "TestConditionalLock:test_nestedGuardsUseInclusiveAfterAndExclusiveBefore",
-        "TestConditionalLock:test_oneStepBothActorsAndOwnerChange",
-        "TestConditionalLock:test_partialFallbackCannotBeBypassedBySpendingExpiredBacking",
+        "TestConditionalLock:test_multipleApproversAcceptInSeparateTransactions",
+        "TestConditionalLock:test_oneStepBothActorsAndAuthorizerChange",
         "TestConditionalLock:test_partialReleaseConsumesRuleAndConservesFunds",
         "TestConditionalLock:test_pendingInstructionCannotPinFundsAfterExpiry",
-        "TestConditionalLock:test_receiverAuthorityPersistsAndOwnerDoesNotEnact",
-        "TestConditionalLock:test_receiverProviderAuthorityIsCapturedAtAcceptance",
-        "TestConditionalLock:test_rejectReturnsOriginalOwnerFunds",
-        "TestConditionalLock:test_unlockRuleRequiresNoReceiverAcceptance",
+        "TestConditionalLock:test_rejectReturnsOriginalAuthorizerFunds",
+        "TestConditionalLock:test_releaseIsBoundedToReceiversAndRemainingAmount",
+        "TestConditionalLock:test_unlockRuleRequiresNoApproval",
         "TestConditionalLock:test_v2EventsDescribeBothSidesWithUniqueLegIds",
         "TestHashVectors:test_hashVectorsMatchEvm",
         "TestHashVectors:test_invalidPreimagesAreRejectedBeforeHashing",
+        "TestLegIdentity:test_factoryRejectsAMalformedLockId",
+        "TestLegIdentity:test_legAndRuleIdsMustBeNonEmptyAndFreeOfSlashes",
+        "TestLegIdentity:test_legIdsMustBeDistinctWithinAnEnactment",
+        "TestLegIdentity:test_legMetadataCannotOverrideRegistryKeys",
+        "TestLegIdentity:test_legMetadataReachesBothTransferLegSides",
+        "TestLegIdentity:test_sameLegIdAcrossDifferentEnactmentsDoesNotCollide",
+        "TestOutcomes:test_anUnlockAdmitsNoEnactorSuppliedLegs",
+        "TestOutcomes:test_enactorCannotBurnARuleWithNoLegs",
+        "TestOutcomes:test_enactorLegsAreRejectedWhenReceiversIsEmpty",
+        "TestOutcomes:test_expireAlwaysUnlocksToTheAuthorizer",
+        "TestOutcomes:test_expireCannotBeMadeToPayAThirdParty",
+        "TestOutcomes:test_fixedLegsExceedingTheInitialAmountAreRejectedAtCreation",
+        "TestOutcomes:test_fixedPlusEnactorLegsExceedingRemainderIsRejected",
+        "TestOutcomes:test_releaseCombinesFixedAndEnactorLegs",
+        "TestOutcomes:test_releaseWithEmptyFixedLegsAndEmptyReceiversIsRejected",
+        "TestOutcomes:test_ruleWithTwoAlternativesFiresOnce",
+        "TestOutcomes:test_withdrawBeforeExpiryReturnsTheFundsToTheAuthorizer",
+        "TestRegistryLimits:test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_enactObserversAreTotalAndNameOnlyThePaidAccounts",
+        "TestRegistryLimits:test_enactObserversAreTotalForAnAlreadyFiredRule",
+        "TestRegistryLimits:test_factoryViewAdvertisesExactlyTheEightLimits",
+        "TestRegistryLimits:test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_ruleCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
         "TestWorkedExamples:test_example_arbiterEscrow",
         "TestWorkedExamples:test_example_collateral",
         "TestWorkedExamples:test_example_conditionalPayment",
-        "TestWorkedExamples:test_example_executorFreeDvp",
+        "TestWorkedExamples:test_example_dvpBetweenRegistries",
         "TestWorkedExamples:test_example_htlcLeg",
         "TestWorkedExamples:test_example_vesting"
       ]
     },
     {
-      "checked_at": "2026-09-14T19:25:11.041135+00:00",
+      "checked_at": "2026-09-19T00:04:15.457388+00:00",
       "network_runtime": "testnet",
       "execution": "local Canton OSS, single participant and synchronizer, static time, real Ledger API",
       "splice_version_reference": "0.7.5",
@@ -138,55 +174,86 @@
       "artifacts": [
         {
           "package": "splice-api-token-conditional-lock-v1",
-          "package_id": "9e362fc605d36864ee08d69ef95db6937ab8f920419874f37951cc3a40105c30",
-          "dar_sha256": "dae3a99d0c36da263297f5a785afd7f14af003482ce705d1fa4ccb58b7612a97"
+          "package_id": "cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac",
+          "dar_sha256": "419aea6ca1a7308fc2622ed81d6d5f8f08ac29d293f10c730b6552096bcaf3eb"
         },
         {
           "package": "conditional-lock-test-token",
-          "package_id": "835b9dbe48f386029b327a460a29f0d176fafb768ba93d6f1d8ea3ec94f1835f",
-          "dar_sha256": "da74016a6a8facbc252ca350c20042f1103eb2ea13dd16f0290148d97fdf214b"
+          "package_id": "4cdb5f490003178fe5458e3ec86331f5417fec83ab4a15b9bb5e7d7cb5615097",
+          "dar_sha256": "ec5519eb7a8671f95db922ef36c012549084701148d2475f2ef32e1a065ba216"
         },
         {
           "package": "conditional-lock-test",
-          "package_id": "e792b0aab0931161b3ad2eee5d7fa967556e8f5ef43617661c0618c1c1c9c48d",
-          "dar_sha256": "13add76ea91d3136832553b1c7ba2d3fdc98fb45d29271c7f02e912d58172e5f"
+          "package_id": "be31ae90b1e91c5ee1ff58a1cfa55206f9aa03d7599dcbb13c7604ba5f171e92",
+          "dar_sha256": "cdfd2471f1c55ac1d375bb34f76844ae02f306316203e2178f7da4ac7ce64a88"
         }
       ],
       "passed": [
+        "TestApprovals:test_authorizerProviderMustApproveLockCreation",
+        "TestApprovals:test_availableActionsReportsAcceptGroups",
+        "TestApprovals:test_availableActionsShrinksOnApproval",
+        "TestApprovals:test_lockAvailableActionsPerRule",
+        "TestApprovals:test_lockSignatoriesAreTheAdminAuthorizerAndApprovers",
         "TestConditionalLock:test_amendCannotChangeAssetOrResurrectSpentRules",
-        "TestConditionalLock:test_amendTopUpAndNewReceiverAcceptance",
+        "TestConditionalLock:test_amendTopUpAndNewApproverAcceptance",
+        "TestConditionalLock:test_approverAuthorityPersistsAndAuthorizerDoesNotEnact",
+        "TestConditionalLock:test_approverProviderAuthorityIsCapturedAtAcceptance",
         "TestConditionalLock:test_atomicDvpAcrossTwoTestTokenV2Registries",
         "TestConditionalLock:test_atomicDvpRollsBackFirstEnactWhenSecondFails",
         "TestConditionalLock:test_cancelRequiresEveryNamedParty",
-        "TestConditionalLock:test_distributeIsBoundedToReceiversAndRemainingAmount",
         "TestConditionalLock:test_enactorAndThresholdCannotBeSpoofed",
-        "TestConditionalLock:test_expiryBoundaryAndOwnerOnlyRefund",
+        "TestConditionalLock:test_expiredBackingCannotBeSpentByTheOrdinaryTokenPath",
+        "TestConditionalLock:test_expiryBoundaryAndAuthorizerOnlyRefund",
+        "TestConditionalLock:test_guardsUseInclusiveAfterAndExclusiveBefore",
         "TestConditionalLock:test_keccakWitnessIsNormalizedAndCannotSubstituteSha256",
         "TestConditionalLock:test_malformedTermsAndFundingFailWithoutConsumingInputs",
-        "TestConditionalLock:test_multipleReceiversAcceptInSeparateTransactions",
-        "TestConditionalLock:test_nestedGuardsUseInclusiveAfterAndExclusiveBefore",
-        "TestConditionalLock:test_oneStepBothActorsAndOwnerChange",
-        "TestConditionalLock:test_partialFallbackCannotBeBypassedBySpendingExpiredBacking",
+        "TestConditionalLock:test_multipleApproversAcceptInSeparateTransactions",
+        "TestConditionalLock:test_oneStepBothActorsAndAuthorizerChange",
         "TestConditionalLock:test_partialReleaseConsumesRuleAndConservesFunds",
         "TestConditionalLock:test_pendingInstructionCannotPinFundsAfterExpiry",
-        "TestConditionalLock:test_receiverAuthorityPersistsAndOwnerDoesNotEnact",
-        "TestConditionalLock:test_receiverProviderAuthorityIsCapturedAtAcceptance",
-        "TestConditionalLock:test_rejectReturnsOriginalOwnerFunds",
-        "TestConditionalLock:test_unlockRuleRequiresNoReceiverAcceptance",
+        "TestConditionalLock:test_rejectReturnsOriginalAuthorizerFunds",
+        "TestConditionalLock:test_releaseIsBoundedToReceiversAndRemainingAmount",
+        "TestConditionalLock:test_unlockRuleRequiresNoApproval",
         "TestConditionalLock:test_v2EventsDescribeBothSidesWithUniqueLegIds",
         "TestHashVectors:test_hashVectorsMatchEvm",
         "TestHashVectors:test_invalidPreimagesAreRejectedBeforeHashing",
+        "TestLegIdentity:test_factoryRejectsAMalformedLockId",
+        "TestLegIdentity:test_legAndRuleIdsMustBeNonEmptyAndFreeOfSlashes",
+        "TestLegIdentity:test_legIdsMustBeDistinctWithinAnEnactment",
+        "TestLegIdentity:test_legMetadataCannotOverrideRegistryKeys",
+        "TestLegIdentity:test_legMetadataReachesBothTransferLegSides",
+        "TestLegIdentity:test_sameLegIdAcrossDifferentEnactmentsDoesNotCollide",
+        "TestOutcomes:test_anUnlockAdmitsNoEnactorSuppliedLegs",
+        "TestOutcomes:test_enactorCannotBurnARuleWithNoLegs",
+        "TestOutcomes:test_enactorLegsAreRejectedWhenReceiversIsEmpty",
+        "TestOutcomes:test_expireAlwaysUnlocksToTheAuthorizer",
+        "TestOutcomes:test_expireCannotBeMadeToPayAThirdParty",
+        "TestOutcomes:test_fixedLegsExceedingTheInitialAmountAreRejectedAtCreation",
+        "TestOutcomes:test_fixedPlusEnactorLegsExceedingRemainderIsRejected",
+        "TestOutcomes:test_releaseCombinesFixedAndEnactorLegs",
+        "TestOutcomes:test_releaseWithEmptyFixedLegsAndEmptyReceiversIsRejected",
+        "TestOutcomes:test_ruleWithTwoAlternativesFiresOnce",
+        "TestOutcomes:test_withdrawBeforeExpiryReturnsTheFundsToTheAuthorizer",
+        "TestRegistryLimits:test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_enactObserversAreTotalAndNameOnlyThePaidAccounts",
+        "TestRegistryLimits:test_enactObserversAreTotalForAnAlreadyFiredRule",
+        "TestRegistryLimits:test_factoryViewAdvertisesExactlyTheEightLimits",
+        "TestRegistryLimits:test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
+        "TestRegistryLimits:test_ruleCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
         "TestWorkedExamples:test_example_arbiterEscrow",
         "TestWorkedExamples:test_example_collateral",
         "TestWorkedExamples:test_example_conditionalPayment",
-        "TestWorkedExamples:test_example_executorFreeDvp",
+        "TestWorkedExamples:test_example_dvpBetweenRegistries",
         "TestWorkedExamples:test_example_htlcLeg",
         "TestWorkedExamples:test_example_vesting"
       ]
     }
   ],
   "solana": {
-    "checked_at": "2026-09-14T19:20:24.978506+00:00",
+    "checked_at": "2026-09-18T23:54:49.281443+00:00",
     "execution": "local LiteSVM, compiled SBF program, signed transactions, no RPC or public-cluster deployment",
     "agave_cli": "3.1.14",
     "agave_runtime_dependencies": "3.1.14",
@@ -209,18 +276,18 @@
     "cargo_lock_sha256": "4f08b02d84e0c9475dfb1f2dd8f111da6e49c71a68389269ebfafc26a6797a43",
     "fixture_sha256": "d15dfa7a36483a165d6802dc170c27ce3103b5817608b64fcc8f98ad8360f79d",
     "hash_syscall_imports_verified": [
-      "sol_sha256",
-      "sol_keccak256"
+      "sol_keccak256",
+      "sol_sha256"
     ]
   },
   "worked_example_mutations": {
-    "checked_at": "2026-09-14T19:25:32.614314+00:00",
+    "checked_at": "2026-09-19T00:07:48.674927+00:00",
     "execution": "Daml IDE ledger in isolated temporary copies, one deliberate adapter fault per trial; canonical source and interface package unchanged",
     "scope": "Seven targeted sensitivity checks; not an exhaustive mutation score",
     "baseline_source_sha256": {
-      "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml": "f7135a0931938242b8c00b567dc77de9a9e6014f8ed4d19b6eab4234564b15cb",
-      "packages/conditional-lock-test-token/daml/ConditionalLock/TestToken.daml": "79ae61a9dcf825004d0785079f3e6f49f3899597655d6339042f173fb1e37813",
-      "packages/conditional-lock-test/daml/TestWorkedExamples.daml": "5c0fe404f6fb6f97c2bc4cf1c3e93489fb73ca9d10d7bee10b96c4a3e2972bab"
+      "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml": "23793cfc3242b898678ecdc7f60ff91c17a5d6a7f9533bb2a30775cb312f0d19",
+      "packages/conditional-lock-test-token/daml/ConditionalLock/TestToken.daml": "c4ece1a47b9d582cdf4d49643e8bc8552a63f0b69164c8ec9f1e6277e388b0be",
+      "packages/conditional-lock-test/daml/TestWorkedExamples.daml": "96c5625db8aa152f38e5833657e145f7b542361b1dab914a0b8b2e7387140750"
     },
     "commands": {
       "adapter_build": {
@@ -241,7 +308,7 @@
     "trials": [
       {
         "id": "normalization-removed",
-        "checked_at": "2026-09-14T19:22:58.698195+00:00",
+        "checked_at": "2026-09-19T00:07:10.057091+00:00",
         "source": "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml",
         "replacement": {
           "before": "let normalized = Text.asciiToLower preimage",
@@ -252,38 +319,30 @@
         "test_exit_code": 1,
         "result": "detected at runtime",
         "observed_failure": {
-          "location": "TestWorkedExamples:180:20",
-          "message": "Failed with status: UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed: guard not satisfied",
-          "source_line": "validTree <- submitTree e.bob $ exerciseCmd validCid $",
-          "cause": "The uppercase ascending-bytes witness reaches its matching Keccak-256 positive enactment and is rejected with guard not satisfied. The trace identifies lockId htlc-keccak, algorithm Keccak256, and digest 8ae1aa597fa146ebd3aa2ceddf360668dea5e526567e92b0321816a4e895bd2d.",
-          "ledger_time": "1970-01-02T00:00:00Z",
-          "guard_algorithm": "Keccak256",
-          "lock_id": "htlc-keccak"
+          "location": "TestWorkedExamples:202:20",
+          "message": "Script execution failed on commit at TestWorkedExamples:202:20:\n  Failed with status: UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed: no alternative is satisfied\n  Using Canton Error Category InvalidGivenCurrentSystemStateOther"
         }
       },
       {
         "id": "algorithm-selection-ignored",
-        "checked_at": "2026-09-14T19:22:20.796003+00:00",
+        "checked_at": "2026-09-19T00:07:10.100921+00:00",
         "source": "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml",
         "replacement": {
-          "before": "Guard_Preimage algorithm digest -> any (\\p -> hashPreimage algorithm p == Some digest) witness.preimages",
-          "after": "Guard_Preimage algorithm digest -> any (\\p -> hashPreimage Sha256 p == Some digest || hashPreimage Keccak256 p == Some digest) witness.preimages"
+          "before": "any (\\p -> hashPreimage algorithm p == Some digest) witness.preimages",
+          "after": "any (\\p -> hashPreimage Sha256 p == Some digest || hashPreimage Keccak256 p == Some digest) witness.preimages"
         },
         "script": "TestWorkedExamples:test_example_htlcLeg",
         "build_exit_code": 0,
         "test_exit_code": 1,
         "result": "detected at runtime",
         "observed_failure": {
-          "location": "TestWorkedExamples:194:7",
-          "message": "Aborted:  Expected submit to fail but it succeeded",
-          "source_line": "submitMustFail e.bob $ exerciseCmd (fst handle) $",
-          "cause": "The SHA-256 guard carrying the Keccak digest accepts the shared ascending-bytes preimage, causing submitMustFail to abort because submission succeeded.",
-          "ledger_time": "1970-01-02T00:00:00Z"
+          "location": "TestWorkedExamples:216:7",
+          "message": "Script execution failed on commit at TestWorkedExamples:216:7:\n  Aborted:  Expected submit to fail but it succeeded"
         }
       },
       {
         "id": "after-boundary-exclusive",
-        "checked_at": "2026-09-14T19:22:20.796249+00:00",
+        "checked_at": "2026-09-19T00:07:10.144692+00:00",
         "source": "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml",
         "replacement": {
           "before": "Guard_After t -> now >= t",
@@ -294,33 +353,13 @@
         "test_exit_code": 1,
         "result": "detected at runtime",
         "observed_failure": {
-          "location": "TestWorkedExamples:357:16",
-          "message": "Failed with status: UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed: guard not satisfied",
-          "source_line": "firstTree <- submitTree grantee $ exerciseCmd (fst initial) $ enactArg \"tranche-1\" [grantee]",
-          "cause": "The first vesting tranche is rejected at exactly t0 + 1h with guard not satisfied, proving the test exercises the inclusive Guard_After boundary.",
-          "ledger_time": "1970-01-01T01:00:00Z"
-        }
-      },
-      {
-        "id": "distribute-allows-unlisted-receiver",
-        "checked_at": "2026-09-14T19:22:36.878002+00:00",
-        "source": "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml",
-        "replacement": {
-          "before": "      assertMsg \"receiver outside agreed distribution set\" (all (\\l -> l.receiver `elem` allowed) ls)\n",
-          "after": ""
-        },
-        "script": "TestWorkedExamples:test_example_arbiterEscrow",
-        "build_exit_code": 0,
-        "test_exit_code": 1,
-        "result": "detected at runtime",
-        "observed_failure": {
-          "location": "TestWorkedExamples:300:3",
-          "message": "Script execution failed on commit at TestWorkedExamples:300:3:\n  Aborted:  Expected submit to fail but it succeeded"
+          "location": "TestWorkedExamples:381:16",
+          "message": "Script execution failed on commit at TestWorkedExamples:381:16:\n  Failed with status: UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed: no alternative is satisfied\n  Using Canton Error Category InvalidGivenCurrentSystemStateOther"
         }
       },
       {
         "id": "before-inclusive",
-        "checked_at": "2026-09-14T19:22:36.878481+00:00",
+        "checked_at": "2026-09-19T00:07:10.188447+00:00",
         "source": "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml",
         "replacement": {
           "before": "  Guard_Before t -> now < t\n",
@@ -331,16 +370,33 @@
         "test_exit_code": 1,
         "result": "detected at runtime",
         "observed_failure": {
-          "location": "TestWorkedExamples:536:3",
-          "message": "Script execution failed on commit at TestWorkedExamples:536:3:\n  Aborted:  Expected submit to fail but it succeeded"
+          "location": "TestWorkedExamples:564:3",
+          "message": "Script execution failed on commit at TestWorkedExamples:564:3:\n  Aborted:  Expected submit to fail but it succeeded"
+        }
+      },
+      {
+        "id": "release-allows-unlisted-receiver",
+        "checked_at": "2026-09-19T00:07:10.230800+00:00",
+        "source": "packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml",
+        "replacement": {
+          "before": "  assertMsg \"receiver outside the agreed receiver set\" $\n    all (\\l -> l.receiver `elem` receivers) supplied\n",
+          "after": ""
+        },
+        "script": "TestWorkedExamples:test_example_arbiterEscrow",
+        "build_exit_code": 0,
+        "test_exit_code": 1,
+        "result": "detected at runtime",
+        "observed_failure": {
+          "location": "TestWorkedExamples:323:3",
+          "message": "Script execution failed on commit at TestWorkedExamples:323:3:\n  Aborted:  Expected submit to fail but it succeeded"
         }
       },
       {
         "id": "amend-no-conservation",
-        "checked_at": "2026-09-14T19:22:36.879090+00:00",
+        "checked_at": "2026-09-19T00:07:10.273833+00:00",
         "source": "packages/conditional-lock-test-token/daml/ConditionalLock/TestToken.daml",
         "replacement": {
-          "before": "        assertMsg \"amended amount must equal remainder plus top-up\" (arg.newTerms.amount == state.terms.amount + topUp)\n",
+          "before": "        assertMsg \"the increase must be funded by the additional input holdings\" $\n          state.terms.amount + topUp >= arg.newTerms.amount\n",
           "after": ""
         },
         "script": "TestWorkedExamples:test_example_collateral",
@@ -348,25 +404,25 @@
         "test_exit_code": 1,
         "result": "detected at runtime",
         "observed_failure": {
-          "location": "TestWorkedExamples:470:3",
-          "message": "Script execution failed on commit at TestWorkedExamples:470:3:\n  Aborted:  Expected submit to fail but it succeeded"
+          "location": "TestWorkedExamples:496:3",
+          "message": "Script execution failed on commit at TestWorkedExamples:496:3:\n  Aborted:  Expected submit to fail but it succeeded"
         }
       },
       {
         "id": "received-event-wrong-side",
-        "checked_at": "2026-09-14T19:22:36.879392+00:00",
+        "checked_at": "2026-09-19T00:07:48.674927+00:00",
         "source": "packages/conditional-lock-test-token/daml/ConditionalLock/TestToken.daml",
         "replacement": {
-          "before": "    let incoming = [ side Events.ReceiverSide s.terms.owner i leg\n",
-          "after": "    let incoming = [ side Events.SenderSide s.terms.owner i leg\n"
+          "before": "side Events.ReceiverSide s.terms.authorizer leg",
+          "after": "side Events.SenderSide s.terms.authorizer leg"
         },
-        "script": "TestWorkedExamples:test_example_executorFreeDvp",
+        "script": "TestWorkedExamples:test_example_dvpBetweenRegistries",
         "build_exit_code": 0,
         "test_exit_code": 1,
         "result": "detected at runtime",
         "observed_failure": {
-          "location": "TestWorkedExamples:132 (assertion identified from expected/actual values; diagnostic identifies script range)",
-          "message": "AssertionFailed: transfer leg dvp-x/settle/1/0 reported SenderSide; expected ReceiverSide."
+          "location": "TestWorkedExamples:236:1-236:34",
+          "message": "Script execution failed:\n  Failed with status: UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed: Failure, expected [TransferLegSide {transferLegId = \"dvp-x/settle/settle\", side = SenderSide, otherside = Account {owner = Some 'cl-alice-d4d95138', provider = None, id = \"\"}, amount = 100.0, instrumentId = \"X\", meta = Metadata {values = TextMap [(\"splice.lfdecentralizedtrust.org/conditional-lock/rule-id\",\"settle\"),(\"splice.lfdecentralizedtrust.org/reason\",\"settle\"),(\"splice.lfdecentralizedtrust.org/tx-kind\",\"transfer\")]}}] == [TransferLegSide {transferLegId = \"dvp-x/settle/settle\", side = ReceiverSide, otherside = Account {owner = Some 'cl-alice-d4d95138', provider = None, id = \"\"}, amount = 100.0, instrumentId = \"X\", meta = Metadata {values = TextMap [(\"splice.lfdecentralizedtrust.org/conditional-lock/rule-id\",\"settle\"),(\"splice.lfdecentralizedtrust.org/reason\",\"settle\"),(\"splice.lfdecentralizedtrust.org/tx-kind\",\"transfer\")]}}]\n  Using Canton Error Category InvalidGivenCurrentSystemStateOther"
         }
       }
     ]

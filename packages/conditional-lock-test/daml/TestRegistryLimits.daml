@@ -1,0 +1,325 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestRegistryLimits where
+
+import DA.Assert
+import DA.Foldable (forA_)
+import DA.List (head, sort)
+import DA.TextMap qualified as TextMap
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import ConditionalLock.Policy
+import ConditionalLock.TestToken qualified as Impl
+import TestConditionalLock
+
+-- CIP section 3.8: the factory view advertises exactly the eight registry limits.
+test_factoryViewAdvertisesExactlyTheEightLimits : Script ()
+test_factoryViewAdvertisesExactlyTheEightLimits = do
+  e <- setup ()
+  f <- factory e.rulesA (termsFor e) "limits-view"
+  fetched <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_PublicFetch [e.alice]
+  fetched.admin === e.adminA
+  let keys = sort (map fst (TextMap.toList fetched.meta.values))
+  let expectedKeys = sort $ map (prefix <>)
+        [ "conditional-lock/max-rules"
+        , "conditional-lock/max-legs"
+        , "conditional-lock/max-alternatives-per-rule"
+        , "conditional-lock/max-guards-per-alternative"
+        , "conditional-lock/max-preimages"
+        , "conditional-lock/max-named-parties"
+        , "conditional-lock/min-duration"
+        , "conditional-lock/max-duration" ]
+  length keys === 8
+  keys === expectedKeys
+  let numeric =
+        [ ("max-rules", maxRules)
+        , ("max-legs", maxLegs)
+        , ("max-alternatives-per-rule", maxAlternativesPerRule)
+        , ("max-guards-per-alternative", maxGuardsPerAlternative)
+        , ("max-preimages", maxPreimages)
+        , ("max-named-parties", maxNamedParties) ]
+  forA_ numeric $ \(k, v) -> do
+    TextMap.lookup (prefix <> "conditional-lock/" <> k) fetched.meta.values === Some (show v)
+    assert (v >= 8)
+  -- Literal expectations that do not derive from the implementation: pins the
+  -- six numeric limits this registry advertises against hardcoded values, so a
+  -- change to any constant above is visible here even though `numeric` was
+  -- built from those same constants.
+  map snd numeric === [8, 8, 8, 8, 8, 8]
+  TextMap.lookup (prefix <> "conditional-lock/max-duration") fetched.meta.values === Some "P365D"
+  assert (maxDuration >= days 30)
+  -- The advertised ISO-8601 text and the enforced constant are two sources of
+  -- truth; pin them together so one can never drift from the other.
+  maxDuration === days 365
+  TextMap.lookup (prefix <> "conditional-lock/min-duration") fetched.meta.values === Some "PT1S"
+  assert (minDuration <= maxDuration)
+  minDuration === seconds 1
+  -- Not a second, divergent source of the advertised limits.
+  Some ownView <- queryInterfaceContractId e.adminA f
+  fetched === ownView
+
+-- CIP section 3.8: max-rules is the only defect between these two terms.
+test_ruleCountAtTheLimitIsAcceptedAndOverTheLimitRejected : Script ()
+test_ruleCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
+  e <- setup ()
+  let rule n = CL.Rule ("r" <> show n) [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock
+  let atLimit = (termsFor e) with rules = map rule [1 .. maxRules]
+  let overLimit = atLimit with rules = map rule [1 .. maxRules + 1]
+  input <- mint atLimit atLimit.amount
+  f <- factory e.rulesA atLimit "rule-count"
+  failsBecause (actAs [e.alice] <> readAs [e.adminA]) "at most max-rules rules" $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock overLimit [input] [e.alice] extra
+  result <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock atLimit [input] [e.alice] extra
+  _ <- asLocked result
+  pure ()
+
+-- CIP section 3.8: max-legs bounds fixedLegs, Outcome_Release.receivers, and the combined legs released by one enactment.
+test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected : Script ()
+test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
+  e <- setup ()
+  let fixedLeg n = CL.Leg ("f" <> show n) (account e.bob) 1.0 emptyMetadata
+
+  -- (a) fixedLegs count. Amounts stay well under the locked amount in both
+  -- cases, so the count is the only defect.
+  let fixedRule legs = CL.Rule "fixed-legs" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+        (CL.Outcome_Release legs [])
+  let atLimitFixed = (termsFor e) with rules = [fixedRule (map fixedLeg [1 .. maxLegs])]
+  let overLimitFixed = atLimitFixed with rules = [fixedRule (map fixedLeg [1 .. maxLegs + 1])]
+  inputFixed <- mint atLimitFixed atLimitFixed.amount
+  fFixed <- factory e.rulesA atLimitFixed "fixed-legs"
+  -- Rejected inside `validateTerms`'s per-rule loop, by the same check that
+  -- covers every other malformed outcome.
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA]) "invalid rule outcome" $ exerciseCmd fFixed $
+    CL.ConditionalLockFactory_Lock overLimitFixed [inputFixed] [e.alice, e.bob] extra
+  fixedResult <- submit (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd fFixed $
+    CL.ConditionalLockFactory_Lock atLimitFixed [inputFixed] [e.alice, e.bob] extra
+  _ <- asLocked fixedResult
+
+  -- (b) Outcome_Release.receivers count. Same owner, distinct Account.id, so
+  -- termReceivers grows without adding a named party: bob alone approves all
+  -- of them at lock time.
+  let receiverAccount n = V2.Account (Some e.bob) None ("r" <> show n)
+  let receiversRule accounts = CL.Rule "receivers" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+        (CL.Outcome_Release [] accounts)
+  let atLimitReceivers = (termsFor e) with rules = [receiversRule (map receiverAccount [1 .. maxLegs])]
+  let overLimitReceivers = atLimitReceivers with rules = [receiversRule (map receiverAccount [1 .. maxLegs + 1])]
+  inputReceivers <- mint atLimitReceivers atLimitReceivers.amount
+  fReceivers <- factory e.rulesA atLimitReceivers "receivers-legs"
+  -- Same check as (a): `validOutcome` also bounds `Outcome_Release.receivers`.
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA]) "invalid rule outcome" $ exerciseCmd fReceivers $
+    CL.ConditionalLockFactory_Lock overLimitReceivers [inputReceivers] [e.alice, e.bob] extra
+  receiversResult <- submit (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd fReceivers $
+    CL.ConditionalLockFactory_Lock atLimitReceivers [inputReceivers] [e.alice, e.bob] extra
+  _ <- asLocked receiversResult
+
+  -- (c) fixedLegs plus enactor-supplied legs on a live lock. Rejection first:
+  -- a successful enactment consumes the rule.
+  let combinedFixed = map fixedLeg [1 .. 4]
+  let terms = (termsFor e) with
+        rules = [CL.Rule "combo" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release combinedFixed [account e.charlie])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  let suppliedLeg n = CL.Leg ("s" <> show n) (account e.charlie) 1.0 emptyMetadata
+  -- 4 fixed legs plus 5 supplied legs is one over max-legs; caught in
+  -- `resolveOutcome`, distinct from the lock-time `validOutcome` check in (a)/(b).
+  failsBecause (actAs e.arbiter) "legs must be well formed, within max-legs, and have unique IDs" $ exerciseCmd cid $
+    (enactArg "combo" [e.arbiter]) with legs = map suppliedLeg [1 .. maxLegs - 3]
+  result <- submit e.arbiter $ exerciseCmd cid $
+    (enactArg "combo" [e.arbiter]) with legs = map suppliedLeg [1 .. maxLegs - 4]
+  case result.output of
+    CL.ConditionalLockResult_Enacted receiverOutputs [] (Some next) -> do
+      length receiverOutputs === maxLegs
+      Some view <- queryInterfaceContractId e.alice next
+      view.terms.amount === terms.amount - 8.0
+    _ -> abort "expected combined leg release at the limit"
+
+-- CIP section 3.8: max-alternatives-per-rule and max-guards-per-alternative.
+test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected : Script ()
+test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
+  e <- setup ()
+  let oneGuardAlt = CL.Alternative [CL.Guard_Parties [e.arbiter] 1]
+  let altsRule n = CL.Rule "alts" [e.arbiter] (map (const oneGuardAlt) [1 .. n]) CL.Outcome_Unlock
+  let atLimitAlts = (termsFor e) with rules = [altsRule maxAlternativesPerRule]
+  let overLimitAlts = atLimitAlts with rules = [altsRule (maxAlternativesPerRule + 1)]
+  inputAlts <- mint atLimitAlts atLimitAlts.amount
+  fAlts <- factory e.rulesA atLimitAlts "alt-count"
+  failsBecause (actAs [e.alice] <> readAs [e.adminA]) "invalid or oversized guards" $ exerciseCmd fAlts $
+    CL.ConditionalLockFactory_Lock overLimitAlts [inputAlts] [e.alice] extra
+  altsResult <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd fAlts $
+    CL.ConditionalLockFactory_Lock atLimitAlts [inputAlts] [e.alice] extra
+  _ <- asLocked altsResult
+
+  let guardsRule n = CL.Rule "guards" [e.arbiter]
+        [CL.Alternative (map (const (CL.Guard_Parties [e.arbiter] 1)) [1 .. n])] CL.Outcome_Unlock
+  let atLimitGuards = (termsFor e) with rules = [guardsRule maxGuardsPerAlternative]
+  let overLimitGuards = atLimitGuards with rules = [guardsRule (maxGuardsPerAlternative + 1)]
+  inputGuards <- mint atLimitGuards atLimitGuards.amount
+  fGuards <- factory e.rulesA atLimitGuards "guard-count"
+  -- Same message as the alternatives case above: `validAlternatives` bounds both.
+  failsBecause (actAs [e.alice] <> readAs [e.adminA]) "invalid or oversized guards" $ exerciseCmd fGuards $
+    CL.ConditionalLockFactory_Lock overLimitGuards [inputGuards] [e.alice] extra
+  guardsResult <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd fGuards $
+    CL.ConditionalLockFactory_Lock atLimitGuards [inputGuards] [e.alice] extra
+  _ <- asLocked guardsResult
+  pure ()
+
+-- CIP section 3.8: max-preimages, isolated on a live lock's witness length; the over-limit witness still includes the correct preimage.
+test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected : Script ()
+test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Preimage CL.Sha256 zeroSha))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  let fillers k = map (\n -> "p" <> show n) [1 .. k]
+  failsBecause (actAs e.arbiter) "at most max-preimages preimages" $ exerciseCmd cid $
+    (enactArg "release" [e.arbiter]) with witness = CL.Witness (zero :: fillers 8)
+  result <- submit e.arbiter $ exerciseCmd cid $
+    (enactArg "release" [e.arbiter]) with witness = CL.Witness (zero :: fillers 7)
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected preimage release at the limit"
+
+-- CIP section 3.8: max-named-parties, isolated via enactors alone: one Outcome_Unlock rule has no receivers and no approvals, so the lock goes straight to Locked.
+test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected : Script ()
+test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
+  e <- setup ()
+  extraParties <- forA [1 .. maxNamedParties + 1] (\n -> allocateParty ("cl-named-" <> show n))
+  let namedRule ps = CL.Rule "unlock" ps (alt (CL.Guard_Parties [head ps] 1)) CL.Outcome_Unlock
+  let atLimitTerms = (termsFor e) with rules = [namedRule (take maxNamedParties extraParties)]
+  let overLimitTerms = atLimitTerms with rules = [namedRule (take (maxNamedParties + 1) extraParties)]
+  input <- mint atLimitTerms atLimitTerms.amount
+  f <- factory e.rulesA atLimitTerms "named-party-count"
+  failsBecause (actAs [e.alice] <> readAs [e.adminA]) "at most max-named-parties named parties" $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock overLimitTerms [input] [e.alice] extra
+  result <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock atLimitTerms [input] [e.alice] extra
+  _ <- asLocked result
+  length (namedParties atLimitTerms) === maxNamedParties
+
+-- CIP section 3.8: min-duration and max-duration bound `expiresAt`.
+test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected : Script ()
+test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
+  e <- setup ()
+  let base = (termsFor e) with rules = []
+  let atMin = base with expiresAt = e.now `addRelTime` minDuration
+  let underMin = base with expiresAt = e.now `addRelTime` (minDuration - convertMicrosecondsToRelTime 1)
+  let atMax = base with expiresAt = e.now `addRelTime` maxDuration
+  let overMax = base with expiresAt = e.now `addRelTime` (maxDuration + seconds 1)
+
+  inputMin <- mint atMin atMin.amount
+  fMin <- factory e.rulesA atMin "min-duration"
+  failsBecause (actAs [e.alice] <> readAs [e.adminA]) "expiry must be within the advertised duration bounds" $ exerciseCmd fMin $
+    CL.ConditionalLockFactory_Lock underMin [inputMin] [e.alice] extra
+  minResult <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd fMin $
+    CL.ConditionalLockFactory_Lock atMin [inputMin] [e.alice] extra
+  _ <- asLocked minResult
+
+  inputMax <- mint atMax atMax.amount
+  fMax <- factory e.rulesA atMax "max-duration"
+  -- Same message as the min-duration case above: one check bounds both ends.
+  failsBecause (actAs [e.alice] <> readAs [e.adminA]) "expiry must be within the advertised duration bounds" $ exerciseCmd fMax $
+    CL.ConditionalLockFactory_Lock overMax [inputMax] [e.alice] extra
+  maxResult <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd fMax $
+    CL.ConditionalLockFactory_Lock atMax [inputMax] [e.alice] extra
+  _ <- asLocked maxResult
+  pure ()
+
+-- CIP section 3.9: `conditionalLock_enactExtraObservers` is total and names only the accounts the enacted outcome pays.
+test_enactObserversAreTotalAndNameOnlyThePaidAccounts : Script ()
+test_enactObserversAreTotalAndNameOnlyThePaidAccounts = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules =
+          [ CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+              (CL.Outcome_Release [] [account e.bob, account e.charlie, account e.alice])
+          , CL.Rule "giveback" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock ]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  [(_, activeLock)] <- query @Impl.ActiveLock e.alice
+  let state = activeLock.state
+  -- Every normative assertion below goes through the interface method, not the
+  -- `Impl.enactObservers` helper directly: rewriting the interface binding to
+  -- something wider (e.g. `namedParties state.terms`) would leave a suite that
+  -- only called the helper directly green, even though it would leak every
+  -- named party's preimage to every named party (ConditionalLockV1.daml MUST).
+  let iface = toInterface @CL.ConditionalLock (Impl.ActiveLock state)
+
+  -- Unknown rule id: total, yields no observers, and the rejection happens in
+  -- the choice body, not in the observer function.
+  CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "no-such-rule" [] noWitness [] extra) === []
+  submitMustFail e.arbiter $ exerciseCmd cid $ enactArg "no-such-rule" [e.arbiter]
+
+  -- Outcome_Unlock: funds return to the authorizer, already a signatory.
+  CL.conditionalLock_enactExtraObservers iface (enactArg "giveback" [e.arbiter]) === []
+
+  -- Only the paid receiver is named, never a receiver merely eligible.
+  let bobLeg = CL.Leg "b" (account e.bob) 5.0 emptyMetadata
+  let charlieLeg = CL.Leg "c" (account e.charlie) 5.0 emptyMetadata
+  let aliceLeg = CL.Leg "a" (account e.alice) 5.0 emptyMetadata
+  CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [bobLeg] extra) === [e.bob]
+  CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [bobLeg, charlieLeg] extra) === [e.bob, e.charlie]
+  -- A leg paying the authorizer, already a signatory, contributes no observer,
+  -- even though the authorizer is itself in the agreed receiver set.
+  CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [bobLeg, aliceLeg] extra) === [e.bob]
+  -- A leg naming an account outside the agreed receiver set contributes no
+  -- observer either. The choice body rejects such a leg, but the function is
+  -- evaluated first and MUST NOT name parties beyond the accounts the outcome
+  -- pays, so it MUST NOT take the supplied receiver on trust.
+  let outsideLeg = CL.Leg "x" (account e.provider) 5.0 emptyMetadata
+  CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [outsideLeg] extra) === []
+  CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [bobLeg, outsideLeg] extra) === [e.bob]
+
+  -- CIP section 3.9 covers all eight `*ExtraObservers` functions. This registry
+  -- serves a public test instrument, so the lock choice names every named party
+  -- of the terms and keeps the creation to a single view.
+  let factoryIface = toInterface @CL.ConditionalLockFactory (Impl.Factory e.adminA e.rulesA "observer-budget")
+  CL.conditionalLockFactory_lockExtraObservers factoryIface
+    (CL.ConditionalLockFactory_Lock terms [] [e.alice] extra) === namedParties terms
+  assert (not (null (namedParties terms)))
+
+  -- Unit coverage of the underlying helper, kept distinct from the normative,
+  -- interface-routed assertions above.
+  Impl.enactObservers state (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [bobLeg, aliceLeg] extra) === [e.bob]
+
+  -- `ConditionalLock_Expire` names no observer, as for `Outcome_Unlock`.
+  CL.conditionalLock_expireExtraObservers iface (CL.ConditionalLock_Expire [e.alice] extra) === []
+
+-- CIP section 3.9: the "already fired" half of the interface's totality MUST.
+test_enactObserversAreTotalForAnAlreadyFiredRule : Script ()
+test_enactObserversAreTotalForAnAlreadyFiredRule = do
+  e <- setup ()
+  -- A second, unfired rule keeps `namedParties` of the continuation non-empty,
+  -- so this test cannot pass by coincidence: widening `enactObservers` to
+  -- `namedParties s.terms` would be caught here, unlike with a single rule,
+  -- where the continuation's `rules = []` makes `namedParties` empty either way.
+  let terms = (termsFor e) with
+        rules =
+          [ CL.Rule "first" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+              (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 30.0 emptyMetadata] [])
+          , CL.Rule "second" [e.charlie] (alt (CL.Guard_Parties [e.charlie] 1)) CL.Outcome_Unlock ]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "first" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted _ _ (Some next) -> do
+      Some nextActive <- queryContractId e.alice (coerceContractId next : ContractId Impl.ActiveLock)
+      let state = nextActive.state
+      -- The non-emptiness the next assertion's mutation-sensitivity relies on.
+      assert (not (null (namedParties state.terms)))
+      -- A rule fires once: the fired id is no longer in `terms.rules`, so this
+      -- is the same total case as an unknown rule id, even though `namedParties`
+      -- of the continuation is not itself empty.
+      CL.conditionalLock_enactExtraObservers (toInterface @CL.ConditionalLock (Impl.ActiveLock state))
+        (CL.ConditionalLock_Enact "first" [] noWitness [] extra) === []
+      -- The arbiter is named only by the rule he just fired, so he is neither a
+      -- signatory nor an observer of the continuation and this submission fails
+      -- on visibility rather than in the choice body. The body's own rejection of
+      -- an already enacted rule is covered by
+      -- `TestConditionalLock:test_partialReleaseConsumesRuleAndConservesFunds`,
+      -- whose continuation keeps a rule the arbiter enacts.
+      submitMustFail e.arbiter $ exerciseCmd next $ enactArg "first" [e.arbiter]
+    _ -> abort "expected a continuation after a partial release"
