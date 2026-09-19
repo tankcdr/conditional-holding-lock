@@ -20,23 +20,34 @@ accountParties account = dedup (optionalToList account.owner <> optionalToList a
 
 outcomeReceivers : Outcome -> [Account]
 outcomeReceivers Outcome_Unlock = []
-outcomeReceivers (Outcome_Transfer legs) = map (.receiver) legs
-outcomeReceivers (Outcome_Distribute receivers) = receivers
+outcomeReceivers (Outcome_Release fixedLegs receivers) = map (.receiver) fixedLegs <> receivers
 
+-- | The receivers of the terms: the accounts other than `authorizer` that appear
+-- as a `Leg.receiver` in any `fixedLegs` or in any `Outcome_Release.receivers`.
+-- These are the accounts whose approval this registry requires.
 termReceivers : LockTerms -> [Account]
-termReceivers terms = filter (/= terms.owner) $ dedup $
-  concatMap (outcomeReceivers . (.outcome)) terms.rules <> outcomeReceivers terms.fallback
+termReceivers terms = filter (/= terms.authorizer) $ dedup $
+  concatMap (outcomeReceivers . (.outcome)) terms.rules
 
 guardParties : Guard -> [Party]
 guardParties (Guard_Parties parties _) = parties
-guardParties (Guard_All guards) = concatMap guardParties guards
-guardParties (Guard_Any guards) = concatMap guardParties guards
 guardParties _ = []
 
+ruleParties : Rule -> [Party]
+ruleParties rule = rule.enactors <> concatMap (concatMap guardParties . (.allOf)) rule.anyOf
+
+-- | The named parties of the terms: the parties of every receiver account, every
+-- party in any `Rule.enactors`, and every party in any `Guard_Parties.parties`,
+-- excluding the parties of `authorizer`.
 namedParties : LockTerms -> [Party]
-namedParties terms = filter (`notElem` accountParties terms.owner) $ dedup $
-  concatMap accountParties (termReceivers terms) <>
-  concatMap (\r -> r.enactors <> guardParties r.guard) terms.rules
+namedParties terms = filter (`notElem` accountParties terms.authorizer) $ dedup $
+  concatMap accountParties (termReceivers terms) <> concatMap ruleParties terms.rules
+
+-- | Lock holders for the backing holding (CIP section 3.4). The registry admin
+-- alone when the terms name no party besides the authorizer.
+lockHolders : LockTerms -> [Party]
+lockHolders terms =
+  if null (namedParties terms) then [terms.instrumentId.admin] else namedParties terms
 
 authorized : [Party] -> [Party] -> Bool
 authorized required actors = all (`elem` actors) required
@@ -53,14 +64,55 @@ metadata = Metadata . TextMap.fromList
 resultMetadata : Text -> Text -> Metadata
 resultMetadata kind reason = metadata [(prefix <> "tx-kind", kind), (prefix <> "reason", reason)]
 
+-- The limits this registry advertises. Every key in `limits` is enforced below
+-- and nothing else is enforced as a limit (CIP section 3.8).
+maxRules : Int
+maxRules = 8
+
+maxLegs : Int
+maxLegs = 8
+
+maxAlternativesPerRule : Int
+maxAlternativesPerRule = 8
+
+maxGuardsPerAlternative : Int
+maxGuardsPerAlternative = 8
+
+maxPreimages : Int
+maxPreimages = 8
+
+maxNamedParties : Int
+maxNamedParties = 8
+
+-- ISO-8601 forms of these two are advertised as `min-duration` and `max-duration`.
+minDuration : RelTime
+minDuration = seconds 1
+
+maxDuration : RelTime
+maxDuration = days 365
+
 limits : Metadata
 limits = metadata $ map (\(k, v) -> (prefix <> "conditional-lock/" <> k, v))
-  [ ("max-rules", "8"), ("max-legs", "8"), ("max-guard-depth", "3")
-  , ("max-duration", "P365D"), ("min-duration", "PT1S")
-  , ("max-guard-children", "8"), ("max-preimages", "8") ]
+  [ ("max-rules", show maxRules)
+  , ("max-legs", show maxLegs)
+  , ("max-alternatives-per-rule", show maxAlternativesPerRule)
+  , ("max-guards-per-alternative", show maxGuardsPerAlternative)
+  , ("max-preimages", show maxPreimages)
+  , ("max-named-parties", show maxNamedParties)
+  , ("min-duration", "PT1S")
+  , ("max-duration", "P365D") ]
+
+-- | Keys the registry sets itself on an enactment, which a `Leg.meta` MUST NOT
+-- set (CIP section 3.7). `.../reason` is deliberately not reserved.
+reservedLegKey : Text -> Bool
+reservedLegKey key =
+  key == prefix <> "tx-kind" || Text.isPrefixOf (prefix <> "conditional-lock/") key
 
 isHex32 : Text -> Bool
 isHex32 t = Text.length t == 64 && all (`elem` Text.explode "0123456789abcdef") (Text.explode t)
+
+noSlash : Text -> Bool
+noSlash t = t /= "" && not (Text.isInfixOf "/" t)
 
 -- Validate before invoking the partial crypto builtins. They decode hex bytes;
 -- DA.Text.sha256 would hash the UTF-8 representation instead.
@@ -71,69 +123,91 @@ hashPreimage algorithm preimage =
     Sha256 -> Crypto.sha256 normalized
     Keccak256 -> Crypto.keccak256 normalized
 
-satisfied : Time -> [Party] -> Witness -> Guard -> Bool
-satisfied now actors witness = \case
-  Guard_Preimage algorithm digest -> any (\p -> hashPreimage algorithm p == Some digest) witness.preimages
-  Guard_After t -> now >= t
-  Guard_Before t -> now < t
-  Guard_Parties parties threshold -> length (filter (`elem` actors) (dedup parties)) >= threshold
-  Guard_All guards -> all (satisfied now actors witness) guards
-  Guard_Any guards -> any (satisfied now actors witness) guards
+-- | Guard evaluation (CIP section 3.5). A rule is enactable when some alternative
+-- is satisfied, and an alternative is satisfied when every guard in `allOf` is.
+satisfied : Time -> [Party] -> Witness -> [Alternative] -> Bool
+satisfied now actors witness = any (all leaf . (.allOf))
+  where
+    leaf = \case
+      Guard_Preimage algorithm digest ->
+        any (\p -> hashPreimage algorithm p == Some digest) witness.preimages
+      Guard_After t -> now >= t
+      Guard_Before t -> now < t
+      Guard_Parties parties threshold ->
+        length (filter (`elem` actors) (dedup parties)) >= threshold
 
-validGuard : Int -> Guard -> Bool
-validGuard depth guard = depth <= 3 && case guard of
+validGuard : Guard -> Bool
+validGuard = \case
   Guard_Preimage _ digest -> isHex32 digest
-  Guard_Parties parties threshold -> parties == dedup parties &&
-    threshold >= 1 && threshold <= length parties && length parties <= 8
-  Guard_All guards -> children guards
-  Guard_Any guards -> children guards
+  Guard_Parties parties threshold ->
+    parties == dedup parties && threshold >= 1 && threshold <= length parties
   _ -> True
-  where children gs = not (null gs) && length gs <= 8 && all (validGuard (depth + 1)) gs
+
+validAlternatives : [Alternative] -> Bool
+validAlternatives alternatives =
+  not (null alternatives) && length alternatives <= maxAlternativesPerRule &&
+  all alternative alternatives
+  where
+    alternative a = not (null a.allOf) && length a.allOf <= maxGuardsPerAlternative &&
+      all validGuard a.allOf
 
 validAccount : Account -> Bool
 validAccount account = isSome account.owner
 
-validLegs : Decimal -> [Leg] -> Bool
-validLegs amount legs = not (null legs) && length legs <= 8 &&
-  all (\l -> validAccount l.receiver && l.amount > 0.0) legs &&
-  sum (map (.amount) legs) <= amount
+validLeg : Leg -> Bool
+validLeg leg = noSlash leg.legId && validAccount leg.receiver && leg.amount > 0.0 &&
+  not (any (reservedLegKey . fst) (TextMap.toList leg.meta.values))
+
+-- | A leg set released by one enactment, or the fixed legs of one outcome.
+validLegs : [Leg] -> Bool
+validLegs legs = length legs <= maxLegs && all validLeg legs && dedup ids == ids
+  where ids = map (.legId) legs
 
 validOutcome : Decimal -> Outcome -> Bool
 validOutcome _ Outcome_Unlock = True
-validOutcome amount (Outcome_Transfer legs) = validLegs amount legs
-validOutcome _ (Outcome_Distribute accounts) = not (null accounts) && length accounts <= 8 &&
-  dedup accounts == accounts && all validAccount accounts
+validOutcome amount (Outcome_Release fixedLegs receivers) =
+  not (null fixedLegs && null receivers) &&
+  validLegs fixedLegs && sum (map (.amount) fixedLegs) <= amount &&
+  receivers == dedup receivers && length receivers <= maxLegs && all validAccount receivers
 
 validateTerms : Party -> Time -> LockTerms -> Update ()
 validateTerms admin now terms = do
   assertMsg "instrument admin must match factory" (terms.instrumentId.admin == admin)
-  assertMsg "owner must be a regular account" (validAccount terms.owner)
+  assertMsg "authorizer must be a regular account" (validAccount terms.authorizer)
   assertMsg "amount must be positive" (terms.amount > 0.0)
   assertMsg "requestedAt must be in the past" (terms.requestedAt < now)
-  assertMsg "expiry must be in the future and within 365 days" $
-    terms.expiresAt >= now `addRelTime` seconds 1 && terms.expiresAt <= now `addRelTime` days 365
-  assertMsg "at most 8 rules" (length terms.rules <= 8)
+  assertMsg "expiry must be within the advertised duration bounds" $
+    terms.expiresAt >= now `addRelTime` minDuration && terms.expiresAt <= now `addRelTime` maxDuration
+  assertMsg "at most max-rules rules" (length terms.rules <= maxRules)
   let ids = map (.id) terms.rules
-  assertMsg "rule IDs must be nonempty and unique" (dedup ids == ids && all (/= "") ids)
+  assertMsg "rule IDs must be unique, non-empty, and free of /" (dedup ids == ids && all noSlash ids)
   forA_ terms.rules $ \r -> do
-    assertMsg "rule requires 1..8 unique enactors" $
-      not (null r.enactors) && length r.enactors <= 8 && dedup r.enactors == r.enactors
-    assertMsg "invalid or oversized guard" (validGuard 1 r.guard)
+    assertMsg "rule requires non-empty, duplicate-free enactors" $
+      not (null r.enactors) && dedup r.enactors == r.enactors
+    assertMsg "invalid or oversized guards" (validAlternatives r.anyOf)
     assertMsg "invalid rule outcome" (validOutcome terms.amount r.outcome)
-  assertMsg "invalid fallback" (validOutcome terms.amount terms.fallback)
+  assertMsg "at most max-named-parties named parties" $
+    length (namedParties terms) <= maxNamedParties
+  -- The holding view is built on top of `terms.meta`, so the terms may not set a
+  -- key the registry is required to set either (CIP section 3.7).
+  assertMsg "terms metadata must not set a reserved key" $
+    not (any (reservedLegKey . fst) (TextMap.toList terms.meta.values))
 
-resolveOutcome : LockTerms -> Outcome -> Optional [Leg] -> Update [Leg]
-resolveOutcome terms outcome supplied = do
-  legs <- case outcome of
-    Outcome_Unlock -> do
-      assertMsg "legs only allowed for Distribute" (supplied == None)
-      pure [Leg terms.owner terms.amount]
-    Outcome_Transfer fixed -> do
-      assertMsg "legs only allowed for Distribute" (supplied == None)
-      pure fixed
-    Outcome_Distribute allowed -> do
-      ls <- optional (abort "Distribute requires legs") pure supplied
-      assertMsg "receiver outside agreed distribution set" (all (\l -> l.receiver `elem` allowed) ls)
-      pure ls
-  assertMsg "legs must be positive, bounded, and funded by the remainder" (validLegs terms.amount legs)
+-- | The legs one enactment releases: the outcome's fixed legs together with the
+-- legs the enactor supplies (CIP section 3.6). `terms.amount` is the remaining
+-- amount, so the total released is bounded by it.
+resolveOutcome : LockTerms -> Outcome -> [Leg] -> Update [Leg]
+resolveOutcome terms Outcome_Unlock supplied = do
+  assertMsg "an unlock admits no enactor-supplied legs" (null supplied)
+  pure [Leg "unlock" terms.authorizer terms.amount emptyMetadata]
+resolveOutcome terms (Outcome_Release fixedLegs receivers) supplied = do
+  assertMsg "enactor-supplied legs require a non-empty receiver set" $
+    null supplied || not (null receivers)
+  assertMsg "receiver outside the agreed receiver set" $
+    all (\l -> l.receiver `elem` receivers) supplied
+  let legs = fixedLegs <> supplied
+  assertMsg "legs must be well formed, within max-legs, and have unique IDs" (validLegs legs)
+  let total = sum (map (.amount) legs)
+  assertMsg "the release must be positive and funded by the remaining amount" $
+    total > 0.0 && total <= terms.amount
   pure legs

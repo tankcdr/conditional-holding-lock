@@ -1,0 +1,311 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestOutcomes where
+
+import DA.Assert
+import DA.List (head)
+import DA.Optional (fromSome)
+import DA.TextMap qualified as TextMap
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.TransferEventsV2 qualified as Events
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 qualified as Token
+import ConditionalLock.Policy
+import ConditionalLock.TestToken qualified as Impl
+import TestConditionalLock
+
+-- Ticket #2, section 9.2: two satisfied alternatives fire once, and namedParties collects Guard_Parties from every alternative, not just the first.
+test_ruleWithTwoAlternativesFiresOnce : Script ()
+test_ruleWithTwoAlternativesFiresOnce = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "twoAlt" [e.arbiter]
+          [CL.Alternative [CL.Guard_After e.now], CL.Alternative [CL.Guard_Parties [e.charlie] 1]]
+          (CL.Outcome_Release [CL.Leg "part" (account e.bob) 25.0 emptyMetadata] [])]
+  -- Charlie is named only through the second alternative's Guard_Parties. A flat
+  -- two-level guard shape that only looked at the first alternative would silently
+  -- drop charlie from namedParties, the lock's observers, Lock.holders, the
+  -- max-named-parties count, and the Cancel/Amend consent set.
+  assert (e.arbiter `elem` namedParties terms)
+  assert (e.charlie `elem` namedParties terms)
+  -- Charlie is named but is not a receiver, so the lock still activates from
+  -- [e.alice, e.bob] alone, with no approval required from charlie.
+  (cid, holding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  Some holdingView <- queryInterfaceContractId e.alice holding
+  (fromSome holdingView.lock).holders === lockHolders terms
+  assert (e.charlie `elem` (fromSome holdingView.lock).holders)
+  -- The rule is still enactable by the arbiter: the first alternative, Guard_After
+  -- e.now, is satisfied.
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "twoAlt" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some next) -> do
+      assertToken e.bob out (account e.bob) terms.instrumentId 25.0
+      Some view <- queryInterfaceContractId e.alice next
+      view.terms.amount === 75.0
+      map (.id) view.terms.rules === []
+      view.enactedRuleIds === ["twoAlt"]
+      -- Two satisfied alternatives are one rule, not two firings: "twoAlt" is no
+      -- longer among the continuation's rules, so the continuation carries no
+      -- rule that names the arbiter and namedParties is empty, which leaves the
+      -- arbiter with no visibility into "next" at all. That is a Daml visibility
+      -- error with no assertMsg text of its own, so this stays a plain
+      -- submitMustFail; every business check (entitled enactor, satisfied
+      -- alternative, unknown rule ID) is unreachable behind it.
+      submitMustFail e.arbiter $ exerciseCmd next $ enactArg "twoAlt" [e.arbiter]
+    _ -> abort "expected the rule to fire exactly once"
+
+-- Ticket #4: expiry always returns the full remaining amount to the authorizer,
+-- unlocked, whatever shape the unspent rules take.
+test_expireAlwaysUnlocksToTheAuthorizer : Script ()
+test_expireAlwaysUnlocksToTheAuthorizer = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules =
+          [ CL.Rule "fixed" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+              (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 10.0 emptyMetadata] [])
+          , CL.Rule "discretionary" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+              (CL.Outcome_Release [] [account e.charlie])
+          , CL.Rule "unlock" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock ]
+  let actors = [e.alice, e.bob, e.charlie]
+  -- Two identical locks: one proves the typed result, the other the reported event,
+  -- since a lock can only be expired once.
+  (cid1, _) <- lock e.rulesA terms actors >>= asLocked
+  (cid2, _) <- lock e.rulesA terms actors >>= asLocked
+  setTime terms.expiresAt
+  result <- submit e.alice $ exerciseCmd cid1 $ CL.ConditionalLock_Expire [e.alice] extra
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.authorizer terms.instrumentId 100.0
+    _ -> abort "expected a full unlocked refund to the authorizer"
+  tree <- submitTree e.alice $ exerciseCmd cid2 $ CL.ConditionalLock_Expire [e.alice] extra
+  case holdingsChanges tree.rootEvents of
+    [event] -> do
+      event.account === terms.authorizer
+      event.transferLegSides === []
+      TextMap.lookup (prefix <> "tx-kind") event.extraArgs.meta.values === Some "unlock"
+    _ -> abort "expected exactly one holdings-change event"
+
+-- Ticket #4: only the authorizer's parties can exercise Expire, and expiry cannot be
+-- redirected to a rule's receiver.
+test_expireCannotBeMadeToPayAThirdParty : Script ()
+test_expireCannotBeMadeToPayAThirdParty = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  setTime terms.expiresAt
+  -- Bob is the terms' only receiver, but expiry authority is checked against the
+  -- authorizer's account parties alone; that is the sole assertion Expire makes
+  -- before archiving, so bob's submission fails for no other reason.
+  failsBecause (actAs e.bob) "authorizer account must authorize expiry" $
+    exerciseCmd cid $ CL.ConditionalLock_Expire [e.bob] extra
+  result <- submit e.alice $ exerciseCmd cid $ CL.ConditionalLock_Expire [e.alice] extra
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.authorizer terms.instrumentId 100.0
+    _ -> abort "expected a full unlocked refund to the authorizer"
+  query @Token.Token e.bob >>= (=== [])
+
+-- Ticket #5: Outcome_Release combines fixedLegs and enactor-supplied legs to the
+-- agreed receivers, and an enactor cannot vary a fixed leg.
+test_releaseCombinesFixedAndEnactorLegs : Script ()
+test_releaseCombinesFixedAndEnactorLegs = do
+  e <- setup ()
+  let outcome = CL.Outcome_Release with
+        fixedLegs = [CL.Leg "fee" (account e.provider) 5.0 emptyMetadata]
+        receivers = [account e.bob, account e.charlie]
+  let terms = (termsFor e) with
+        rules = [CL.Rule "settle" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) outcome]
+  let actors = [e.alice, e.bob, e.charlie, e.provider]
+  (cid, _) <- lock e.rulesA terms actors >>= asLocked
+  let arg = enactArg "settle" [e.arbiter]
+  -- The fee account already approved as a fixedLeg receiver, so account authority is
+  -- present; the rejection is "receiver outside the agreed receiver set", which is
+  -- what proves the enactor cannot vary the fixed fee.
+  let overreachLegs =
+        [ CL.Leg "seller" (account e.bob) 60.0 emptyMetadata
+        , CL.Leg "buyer" (account e.charlie) 20.0 emptyMetadata
+        , CL.Leg "extra" (account e.provider) 1.0 emptyMetadata ]
+  failsBecause (actAs e.arbiter) "receiver outside the agreed receiver set" $
+    exerciseCmd cid $ arg with legs = overreachLegs
+  let settleLegs =
+        [ CL.Leg "seller" (account e.bob) 60.0 emptyMetadata
+        , CL.Leg "buyer" (account e.charlie) 20.0 emptyMetadata ]
+  tree <- submitTree e.arbiter $ exerciseCmd cid $ arg with legs = settleLegs
+  feeTokens <- query @Token.Token e.provider
+  bobTokens <- query @Token.Token e.bob
+  charlieTokens <- query @Token.Token e.charlie
+  aliceTokens <- query @Token.Token e.alice
+  sum [ t.holding.amount | (_, t) <- feeTokens, t.holding.account == account e.provider ] === 5.0
+  sum [ t.holding.amount | (_, t) <- bobTokens, t.holding.account == account e.bob ] === 60.0
+  sum [ t.holding.amount | (_, t) <- charlieTokens, t.holding.account == account e.charlie ] === 20.0
+  aliceTokens === []
+  [(_, continuation)] <- query @Impl.ActiveLock e.alice
+  continuation.state.terms.amount === 15.0
+  map (.id) continuation.state.terms.rules === []
+  case holdingsChanges tree.rootEvents of
+    [sent, feeEvent, bobEvent, charlieEvent] -> do
+      map (.side) sent.transferLegSides === [Events.SenderSide, Events.SenderSide, Events.SenderSide]
+      feeEvent.account === account e.provider
+      bobEvent.account === account e.bob
+      charlieEvent.account === account e.charlie
+      case (sent.transferLegSides, feeEvent.transferLegSides, bobEvent.transferLegSides, charlieEvent.transferLegSides) of
+        ([feeOut, bobOut, charlieOut], [feeIn], [bobIn], [charlieIn]) -> do
+          map (.side) [feeIn, bobIn, charlieIn] === [Events.ReceiverSide, Events.ReceiverSide, Events.ReceiverSide]
+          feeIn.transferLegId === feeOut.transferLegId
+          bobIn.transferLegId === bobOut.transferLegId
+          charlieIn.transferLegId === charlieOut.transferLegId
+        _ -> abort "expected one transfer leg side per receiver event"
+    _ -> abort "expected one sender event and three receiver events"
+
+-- Ticket #5, invariant 1: an Outcome_Release with empty fixedLegs and empty receivers
+-- is rejected both at creation and at amendment.
+test_releaseWithEmptyFixedLegsAndEmptyReceiversIsRejected : Script ()
+test_releaseWithEmptyFixedLegsAndEmptyReceiversIsRejected = do
+  e <- setup ()
+  let terms = termsFor e
+  let badTerms = terms with rules = [(head terms.rules) with outcome = CL.Outcome_Release [] []]
+  input <- mint terms terms.amount
+  f <- factory e.rulesA terms "empty-outcome"
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA]) "invalid rule outcome" $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock badTerms [input] [e.alice, e.bob] extra
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  let actors = [e.alice, e.bob, e.arbiter]
+  let goodOutcome = CL.Outcome_Release [CL.Leg "payout" (account e.bob) terms.amount emptyMetadata] []
+  let goodAmend = terms with rules = [(head terms.rules) with id = "replacement"; outcome = goodOutcome]
+  let badAmend = goodAmend with rules = [(head goodAmend.rules) with outcome = CL.Outcome_Release [] []]
+  -- Amount unchanged and fully within the current amount, before expiry, with every
+  -- named party consenting: the only defect left is the outcome shape.
+  failsBecause (actAs actors) "invalid rule outcome" $
+    exerciseCmd cid $ CL.ConditionalLock_Amend badAmend [] actors extra
+  amended <- submit (actAs actors) $ exerciseCmd cid $ CL.ConditionalLock_Amend goodAmend [] actors extra
+  (next, _) <- asLocked amended
+  result <- submit e.arbiter $ exerciseCmd next $ enactArg "replacement" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId terms.amount
+    _ -> abort "expected the amended outcome to still be enactable"
+
+-- Ticket #5, invariant 7a: fixedLegs summing to more than the initial amount are
+-- rejected at creation; the existing suite only exercised this with a single leg.
+test_fixedLegsExceedingTheInitialAmountAreRejectedAtCreation : Script ()
+test_fixedLegsExceedingTheInitialAmountAreRejectedAtCreation = do
+  e <- setup ()
+  let overLegs = [CL.Leg "a" (account e.bob) 60.0 emptyMetadata, CL.Leg "b" (account e.charlie) 50.0 emptyMetadata]
+  let exactLegs = [CL.Leg "a" (account e.bob) 60.0 emptyMetadata, CL.Leg "b" (account e.charlie) 40.0 emptyMetadata]
+  let makeTerms legs = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) (CL.Outcome_Release legs [])]
+  let overTerms = makeTerms overLegs
+  input <- mint overTerms overTerms.amount
+  f <- factory e.rulesA overTerms "over-fixed"
+  failsBecause (actAs [e.alice, e.bob, e.charlie] <> readAs [e.adminA]) "invalid rule outcome" $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock overTerms [input] [e.alice, e.bob, e.charlie] extra
+  let exactTerms = makeTerms exactLegs
+  (cid, _) <- lock e.rulesA exactTerms [e.alice, e.bob, e.charlie] >>= asLocked
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [b, c] [] None -> do
+      assertToken e.bob b (account e.bob) exactTerms.instrumentId 60.0
+      assertToken e.charlie c (account e.charlie) exactTerms.instrumentId 40.0
+    _ -> abort "expected the fixed legs summing to exactly the amount to release in full"
+
+-- Ticket #5, invariant 6: an enactor cannot fire a discretionary rule while supplying
+-- no legs; the release MUST be positive.
+test_enactorCannotBurnARuleWithNoLegs : Script ()
+test_enactorCannotBurnARuleWithNoLegs = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) (CL.Outcome_Release [] [account e.bob])]
+  (cid, holding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  failsBecause (actAs e.arbiter) "the release must be positive and funded by the remaining amount" $
+    exerciseCmd cid $ enactArg "award" [e.arbiter]
+  Some view <- queryInterfaceContractId e.alice cid
+  view.terms.amount === 100.0
+  map (.id) view.terms.rules === ["award"]
+  Some _ <- queryInterfaceContractId e.alice holding
+  result <- submit e.arbiter $ exerciseCmd cid $
+    (enactArg "award" [e.arbiter]) with legs = [CL.Leg "leg" (account e.bob) 40.0 emptyMetadata]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some _) -> assertToken e.bob out (account e.bob) terms.instrumentId 40.0
+    _ -> abort "expected the discretionary rule to release the supplied leg"
+
+-- Ticket #5: an unlock rule admits no enactor-supplied legs, so an enactor cannot
+-- redirect an unlock away from the authorizer.
+test_anUnlockAdmitsNoEnactorSuppliedLegs : Script ()
+test_anUnlockAdmitsNoEnactorSuppliedLegs = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "unlock" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock]
+  (cid, _) <- lock e.rulesA terms [e.alice] >>= asLocked
+  failsBecause (actAs e.arbiter) "an unlock admits no enactor-supplied legs" $ exerciseCmd cid $
+    (enactArg "unlock" [e.arbiter]) with legs = [CL.Leg "redirect" (account e.bob) 10.0 emptyMetadata]
+  -- Positive control: the same unlock with no supplied legs releases to the
+  -- authorizer.
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "unlock" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.authorizer terms.instrumentId 100.0
+    _ -> abort "expected the unlock to release the full amount to the authorizer"
+
+-- Ticket #5, invariant 4: enactor-supplied legs require a non-empty receiver set, even
+-- when the supplied leg would otherwise be well formed and funded.
+test_enactorLegsAreRejectedWhenReceiversIsEmpty : Script ()
+test_enactorLegsAreRejectedWhenReceiversIsEmpty = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "fixed-only" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [CL.Leg "fixed" (account e.bob) 40.0 emptyMetadata] [])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  -- Pinned to the dedicated check, not the "receiver outside the agreed receiver
+  -- set" check that immediately follows it and would also reject this input: that
+  -- is what makes this test detect the dedicated check's removal.
+  failsBecause (actAs e.arbiter) "enactor-supplied legs require a non-empty receiver set" $ exerciseCmd cid $
+    (enactArg "fixed-only" [e.arbiter]) with legs = [CL.Leg "extra" (account e.bob) 10.0 emptyMetadata]
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "fixed-only" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some next) -> do
+      assertToken e.bob out (account e.bob) terms.instrumentId 40.0
+      Some view <- queryInterfaceContractId e.alice next
+      view.terms.amount === 60.0
+    _ -> abort "expected the fixed leg alone to release and continue"
+
+-- Ticket #5, invariant 7b: fixedLegs plus enactor-supplied legs MUST NOT exceed the
+-- remaining amount.
+test_fixedPlusEnactorLegsExceedingRemainderIsRejected : Script ()
+test_fixedPlusEnactorLegsExceedingRemainderIsRejected = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "payout" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [CL.Leg "fee" (account e.bob) 10.0 emptyMetadata] [account e.charlie])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  failsBecause (actAs e.arbiter) "the release must be positive and funded by the remaining amount" $ exerciseCmd cid $
+    (enactArg "payout" [e.arbiter]) with legs = [CL.Leg "share" (account e.charlie) 95.0 emptyMetadata]
+  result <- submit e.arbiter $ exerciseCmd cid $
+    (enactArg "payout" [e.arbiter]) with legs = [CL.Leg "share" (account e.charlie) 90.0 emptyMetadata]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [b, c] [] None -> do
+      assertToken e.bob b (account e.bob) terms.instrumentId 10.0
+      assertToken e.charlie c (account e.charlie) terms.instrumentId 90.0
+    _ -> abort "expected the fixed fee plus the enactor leg to terminate the lock"
+
+-- The withdraw-before-expiry gap: the authorizer can reclaim funds before every
+-- approval is given, and both withdraw and reject report the refund in `ConditionalLockResult_Failed`.
+test_withdrawBeforeExpiryReturnsTheFundsToTheAuthorizer : Script ()
+test_withdrawBeforeExpiryReturnsTheFundsToTheAuthorizer = do
+  e <- setup ()
+  let terms = termsFor e
+  instruction <- lock e.rulesA terms [e.alice] >>= asPending
+  -- Only the authorizer's account parties authorize withdrawal, and that is the sole
+  -- assertion Withdraw makes before archiving, so bob's approver status does not
+  -- entitle him to withdraw.
+  failsBecause (actAs e.bob) "authorizer account must authorize withdrawal" $
+    exerciseCmd instruction $ CL.ConditionalLockInstruction_Withdraw [e.bob] extra
+  result <- submit e.alice $ exerciseCmd instruction $ CL.ConditionalLockInstruction_Withdraw [e.alice] extra
+  CL.ConditionalLockResult_Failed [refund] <- pure result.output
+  result.authorizerChangeCids === []
+  assertToken e.alice refund terms.authorizer terms.instrumentId 100.0
+  query @Impl.LockedHolding e.alice >>= (=== [])
+
+  second <- lock e.rulesA terms [e.alice] >>= asPending
+  rejected <- submit e.bob $ exerciseCmd second $ CL.ConditionalLockInstruction_Reject (account e.bob) [e.bob] extra
+  CL.ConditionalLockResult_Failed [rejectRefund] <- pure rejected.output
+  rejected.authorizerChangeCids === []
+  assertToken e.alice rejectRefund terms.authorizer terms.instrumentId 100.0

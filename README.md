@@ -2,20 +2,20 @@
 
 Apache-2.0 reference code for [CIP-TBD-Conditional-Holding-Lock](docs/cip/CIP-TBD-Conditional-Holding-Lock.md).
 
-This repository provides the interface package, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent receiver authorization, one-step locking, and atomic two-registry settlement. See the [Conditional Holding Lock validation report](docs/runbook/conditional-lock-validation.md).
+This repository provides the interface package, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent approver authorization, one-step locking, and atomic two-registry settlement. See the [Conditional Holding Lock validation report](docs/runbook/conditional-lock-validation.md).
 
 ## Worked examples
 
-Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 29 Daml Scripts, including the 23 mechanics proofs.
+Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 60 Daml Scripts, including the 54 mechanics proofs.
 
 | CIP section 4 example | Named script | Mechanics proofs it relies on |
 | --- | --- | --- |
-| HTLC leg | `test_example_htlcLeg` | receiver authority, expiry boundary, Keccak vs SHA-256, hash vectors |
-| Executor-free DvP | `test_example_executorFreeDvp` | atomic two-registry DvP, rollback, threshold spoofing |
-| Arbiter escrow | `test_example_arbiterEscrow` | distribute bounds, multiple receivers, partial fallback |
-| Vesting | `test_example_vesting` | partial release conservation, spent-rule resurrection, nested guard boundaries |
+| HTLC leg | `test_example_htlcLeg` | approver authority, expiry boundary, Keccak vs SHA-256, hash vectors |
+| Escrowed DvP with a dispute window | `test_example_dvpBetweenRegistries` | atomic two-registry DvP, rollback, threshold spoofing |
+| Arbiter escrow | `test_example_arbiterEscrow` | release bounds, multiple receivers, expiry refund |
+| Vesting | `test_example_vesting` | partial release conservation, spent-rule resurrection, guard boundaries (inclusive After, exclusive Before) |
 | Collateral | `test_example_collateral` | unlock without acceptance, amend top-up, amend cannot change asset |
-| Conditional payment | `test_example_conditionalPayment` | nested guards (inclusive After, exclusive Before), enactor and threshold |
+| Conditional payment | `test_example_conditionalPayment` | alternatives and guard boundaries (inclusive After, exclusive Before), enactor and threshold |
 
 ## Build and prove
 
@@ -53,8 +53,8 @@ To run only the Solana proof, use `npm run test:solana` or `./scripts/test-solan
 
 | Network reference, checked September 11, 2026 | Splice | Canton | Compiler |
 | --------------------------------------------- | ------ | ------ | -------- |
-| Mainnet                                       | 0.7.4  | 3.5.14 | 3.5.2    |
-| Testnet                                       | 0.7.5  | 3.5.15 | 3.5.2    |
+| Mainnet (live has since moved to 0.7.5 / 3.5.15)              | 0.7.4  | 3.5.14 | 3.5.2    |
+| Testnet (live has since moved to 0.8.0 / 3.5.16, not covered) | 0.7.5  | 3.5.15 | 3.5.2    |
 
 These are isolated local ledgers with controlled time, one participant, and one synchronizer. They use unused loopback ports and stop their own processes on exit. Downloads, logs, package IDs, and JSON results stay in gitignored `.localnet/`. No Docker stack or network funds are needed. The first matrix run downloads about 570 MB.
 
@@ -85,7 +85,7 @@ Splice source and downloaded DARs are never committed here. A future Splice impl
 
 ## Reference scope
 
-The adapter consumes and creates **actual published `Splice.Testing.Tokens.TestTokenV2.Holding.Token` contracts**. Locked funds have a distinct backing template, visible through both holding interfaces. Acceptance adds receiver account parties as ledger signatories; subsequent enactment can use that stored authority. Both owner and provider, when present, must authorize account movements. Factories are registry-issued, single-use contracts with distinct lock IDs.
+The adapter consumes and creates **actual published `Splice.Testing.Tokens.TestTokenV2.Holding.Token` contracts**. Locked funds have a distinct backing template, visible through both holding interfaces. Acceptance adds approver account parties as ledger signatories; subsequent enactment can use that stored authority. Both the account owner and provider, when present, must authorize account movements. Factories are registry-issued, single-use contracts with distinct lock IDs.
 
 This proves the Daml mechanics. It is not a Canton Coin integration, a full token-standard conformance certification, a registry HTTP server, or a public-network deployment. TestTokenV2 is a test issuer; production registry account policies, preapprovals, external signing, and Canton Coin submission delays still need their planned implementations.
 
