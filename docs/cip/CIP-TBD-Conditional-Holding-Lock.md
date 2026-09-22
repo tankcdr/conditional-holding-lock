@@ -705,13 +705,13 @@ Written in shorthand: accounts are shown as their owning party, and `Leg` is sho
 
 **A new package rather than a change to `splice-api-token-holding-v2`.** Adding choices to `Holding` would break every implementation. A separate package follows the CIP-0112 evolution model: registries opt in, wallets discover support through `supportedApis`, and the on-ledger footprint is the existing `Lock` view.
 
-**What a registry must implement.** Three interfaces and the holding representation of section 3.4, which is the `Lock` view CIP-0056 already defines. Any registry that implements CIP-0112 can implement this package at the same Daml-LF target. Every guard kind and outcome is mandatory; only the numeric limits of section 3.8 are registry-specific.
+**What a registry must implement.** Three interfaces and the holding representation of section 3.4, which is the `Lock` view CIP-0056 already defines. Any registry that implements CIP-0112 can implement this package at the same Daml-LF target. Every guard kind and outcome is mandatory; only the numeric limits of section 3.8 are registry-specific. Guard evaluation, terms validation, and outcome resolution are pure functions of the terms, the witness, the actors, and ledger time, with no registry-specific input, so every registry would write them identically. The reference implementation provides them as one module that imports only this package and the two API packages it depends on; a registry implements the eight choice bodies and reuses the evaluator rather than the guard language.
 
 **Approvals.** Creating a receiver holding requires the receiver's authority, as for transfers, and a registry MAY also require the account's provider. The instruction names the accounts whose approval is outstanding and reports who may act through `availableActions`.
 
 **Byte-domain hashing.** `DA.Text.sha256` hashes UTF-8 text; `DA.Crypto.Text.sha256` and `keccak256` hash the decoded bytes of a hex string, which is what external-chain hashlocks compute. The preimage is therefore 32 bytes of hex, lowercased, and both algorithms are mandatory: SHA-256 for Bitcoin, Lightning, and EVM HTLCs, Keccak-256 for EVM-native counterparties.
 
-**Relation to CIP-0105 and CIP-0116.** Those CIPs lock Canton Coin per PartyId for Super Validator weight and Featured App eligibility. This CIP is registry-agnostic and has no governance semantics; a Canton Coin implementation would reuse `LockedAmulet` mechanics without touching DSO governance.
+**Canton Coin.** `LockedAmulet` carries only `holders`, `expiresAt`, and a context, so a Canton Coin implementation is a sibling template beside it that carries the terms, with the `ConditionalLockFactory` instance on `ExternalPartyAmuletRules` so that externally signed parties can lock, enact, and expire within the CIP-0107 submission delay. Lock holders are capped by `AmuletConfig.maxNumLockHolders`, which is the bound `max-named-parties` advertises; the holding fee accrued over the life of the lock is netted at enactment and reported in the result `meta` (section 3.6); and the DSO expires abandoned locks as `LockedAmulet_ExpireAmuletV2` does today (Security Considerations, "Expired locks"). None of this touches DSO governance. CIP-0105 and CIP-0116 lock Canton Coin per PartyId for Super Validator weight and Featured App eligibility; this CIP has no governance semantics and leaves them unaffected.
 
 **Alternatives considered.**
 
@@ -748,6 +748,8 @@ An Apache-2.0 reference implementation of this revision is at https://github.com
 2026-09-10 - Initial draft.
 
 2026-09-18 - Review round two, resolving the review comments on the previous revision of `ConditionalLockV1.daml` in canton-network/splice#7294, cited by their line in that revision: flattened `Guard` into a leaf type with `Alternative.allOf` and `Rule.anyOf` (line 47), renamed `owner` to `authorizer` (line 91), removed the fallback outcome so `Expire` returns the remainder to the authorizer (line 102), merged the release outcomes into `Outcome_Release` with `fixedLegs` and enactor-supplied legs bounded by `receivers` (line 250), added `Leg.legId` and `Leg.meta` (line 61), generalized acceptance to an approver `Account` with `pendingApprovals` and `availableActions` (line 194), reworded guard evaluation as a check by the lock's signatories (line 23), fixed `Amend` semantics, specified the eight `*ExtraObservers` functions, added `lockId`, `enactedRuleIds`, and `holdingCids`, and added `authorizerHoldingCids` to `ConditionalLockResult_Failed`.
+
+2026-09-22 - Rationale: guard evaluation is a registry-neutral pure function a registry reuses rather than implements; what a Canton Coin implementation adds.
 
 ## Copyright
 
