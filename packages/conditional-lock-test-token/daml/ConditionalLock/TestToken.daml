@@ -30,14 +30,14 @@ template Factory with
     ensure noSlash lockId
 
     interface instance CL.ConditionalLockFactory for Factory where
-      view = CL.ConditionalLockFactoryView admin limits
+      view = CL.ConditionalLockFactoryView admin (limitsMetadata referenceLimits)
       -- TestTokenV2 is a public test instrument, so this registry names every
       -- named party of the terms and keeps each choice to a single view.
       conditionalLockFactory_lockExtraObservers arg = namedParties arg.terms
-      conditionalLockFactory_publicFetchImpl _ _ = pure (CL.ConditionalLockFactoryView admin limits)
+      conditionalLockFactory_publicFetchImpl _ _ = pure (CL.ConditionalLockFactoryView admin (limitsMetadata referenceLimits))
       conditionalLockFactory_lockImpl self arg = do
         now <- getTime
-        validateTerms admin now arg.terms
+        validateTerms referenceLimits admin now arg.terms
         requireActors "authorizer account must authorize funding" (accountParties arg.terms.authorizer) arg.actors
         rules <- fetch tokenRulesCid
         assertMsg "wrong TestTokenV2 rules admin" (rules.admin == admin)
@@ -190,9 +190,9 @@ template ActiveLock with
         rule <- optional (abort "unknown or already enacted rule") pure
           (find (\r -> r.id == arg.ruleId) state.terms.rules)
         assertMsg "an entitled enactor must act" (any (`elem` arg.actors) rule.enactors)
-        assertMsg "at most max-preimages preimages" (length arg.witness.preimages <= maxPreimages)
+        assertMsg "at most max-preimages preimages" (validWitness referenceLimits arg.witness)
         assertMsg "no alternative is satisfied" (satisfied now arg.actors arg.witness rule.anyOf)
-        legs <- resolveOutcome state.terms rule.outcome arg.legs
+        legs <- resolveOutcome referenceLimits state.terms rule.outcome arg.legs
         archive (coerceContractId self : ContractId ActiveLock)
         enact state (Some rule.id) rule.id legs (filter (\r -> r.id /= rule.id) state.terms.rules)
           (rule.id :: state.enactedRuleIds)
@@ -215,7 +215,7 @@ template ActiveLock with
         assertMsg "amendment cannot change authorizer or instrument" $
           arg.newTerms.authorizer == state.terms.authorizer &&
           arg.newTerms.instrumentId == state.terms.instrumentId
-        validateTerms state.terms.instrumentId.admin now arg.newTerms
+        validateTerms referenceLimits state.terms.instrumentId.admin now arg.newTerms
         assertMsg "amendment cannot reduce the locked amount" (arg.newTerms.amount >= state.terms.amount)
         assertMsg "amendment cannot reuse an enacted rule ID" $
           all (\r -> r.id `notElem` state.enactedRuleIds) arg.newTerms.rules

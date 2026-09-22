@@ -36,12 +36,12 @@ test_factoryViewAdvertisesExactlyTheEightLimits = do
   length keys === 8
   keys === expectedKeys
   let numeric =
-        [ ("max-rules", maxRules)
-        , ("max-legs", maxLegs)
-        , ("max-alternatives-per-rule", maxAlternativesPerRule)
-        , ("max-guards-per-alternative", maxGuardsPerAlternative)
-        , ("max-preimages", maxPreimages)
-        , ("max-named-parties", maxNamedParties) ]
+        [ ("max-rules", referenceLimits.maxRules)
+        , ("max-legs", referenceLimits.maxLegs)
+        , ("max-alternatives-per-rule", referenceLimits.maxAlternativesPerRule)
+        , ("max-guards-per-alternative", referenceLimits.maxGuardsPerAlternative)
+        , ("max-preimages", referenceLimits.maxPreimages)
+        , ("max-named-parties", referenceLimits.maxNamedParties) ]
   forA_ numeric $ \(k, v) -> do
     TextMap.lookup (prefix <> "conditional-lock/" <> k) fetched.meta.values === Some (show v)
     assert (v >= 8)
@@ -51,13 +51,13 @@ test_factoryViewAdvertisesExactlyTheEightLimits = do
   -- built from those same constants.
   map snd numeric === [8, 8, 8, 8, 8, 8]
   TextMap.lookup (prefix <> "conditional-lock/max-duration") fetched.meta.values === Some "P365D"
-  assert (maxDuration >= days 30)
+  assert (referenceLimits.maxDuration >= days 30)
   -- The advertised ISO-8601 text and the enforced constant are two sources of
   -- truth; pin them together so one can never drift from the other.
-  maxDuration === days 365
+  referenceLimits.maxDuration === days 365
   TextMap.lookup (prefix <> "conditional-lock/min-duration") fetched.meta.values === Some "PT1S"
-  assert (minDuration <= maxDuration)
-  minDuration === seconds 1
+  assert (referenceLimits.minDuration <= referenceLimits.maxDuration)
+  referenceLimits.minDuration === seconds 1
   -- Not a second, divergent source of the advertised limits.
   Some ownView <- queryInterfaceContractId e.adminA f
   fetched === ownView
@@ -67,8 +67,8 @@ test_ruleCountAtTheLimitIsAcceptedAndOverTheLimitRejected : Script ()
 test_ruleCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
   e <- setup ()
   let rule n = CL.Rule ("r" <> show n) [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock
-  let atLimit = (termsFor e) with rules = map rule [1 .. maxRules]
-  let overLimit = atLimit with rules = map rule [1 .. maxRules + 1]
+  let atLimit = (termsFor e) with rules = map rule [1 .. referenceLimits.maxRules]
+  let overLimit = atLimit with rules = map rule [1 .. referenceLimits.maxRules + 1]
   input <- mint atLimit atLimit.amount
   f <- factory e.rulesA atLimit "rule-count"
   failsBecause (actAs [e.alice] <> readAs [e.adminA]) "at most max-rules rules" $ exerciseCmd f $
@@ -88,8 +88,8 @@ test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
   -- cases, so the count is the only defect.
   let fixedRule legs = CL.Rule "fixed-legs" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
         (CL.Outcome_Release legs [])
-  let atLimitFixed = (termsFor e) with rules = [fixedRule (map fixedLeg [1 .. maxLegs])]
-  let overLimitFixed = atLimitFixed with rules = [fixedRule (map fixedLeg [1 .. maxLegs + 1])]
+  let atLimitFixed = (termsFor e) with rules = [fixedRule (map fixedLeg [1 .. referenceLimits.maxLegs])]
+  let overLimitFixed = atLimitFixed with rules = [fixedRule (map fixedLeg [1 .. referenceLimits.maxLegs + 1])]
   inputFixed <- mint atLimitFixed atLimitFixed.amount
   fFixed <- factory e.rulesA atLimitFixed "fixed-legs"
   -- Rejected inside `validateTerms`'s per-rule loop, by the same check that
@@ -106,8 +106,8 @@ test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
   let receiverAccount n = V2.Account (Some e.bob) None ("r" <> show n)
   let receiversRule accounts = CL.Rule "receivers" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
         (CL.Outcome_Release [] accounts)
-  let atLimitReceivers = (termsFor e) with rules = [receiversRule (map receiverAccount [1 .. maxLegs])]
-  let overLimitReceivers = atLimitReceivers with rules = [receiversRule (map receiverAccount [1 .. maxLegs + 1])]
+  let atLimitReceivers = (termsFor e) with rules = [receiversRule (map receiverAccount [1 .. referenceLimits.maxLegs])]
+  let overLimitReceivers = atLimitReceivers with rules = [receiversRule (map receiverAccount [1 .. referenceLimits.maxLegs + 1])]
   inputReceivers <- mint atLimitReceivers atLimitReceivers.amount
   fReceivers <- factory e.rulesA atLimitReceivers "receivers-legs"
   -- Same check as (a): `validOutcome` also bounds `Outcome_Release.receivers`.
@@ -128,12 +128,12 @@ test_legCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
   -- 4 fixed legs plus 5 supplied legs is one over max-legs; caught in
   -- `resolveOutcome`, distinct from the lock-time `validOutcome` check in (a)/(b).
   failsBecause (actAs e.arbiter) "legs must be well formed, within max-legs, and have unique IDs" $ exerciseCmd cid $
-    (enactArg "combo" [e.arbiter]) with legs = map suppliedLeg [1 .. maxLegs - 3]
+    (enactArg "combo" [e.arbiter]) with legs = map suppliedLeg [1 .. referenceLimits.maxLegs - 3]
   result <- submit e.arbiter $ exerciseCmd cid $
-    (enactArg "combo" [e.arbiter]) with legs = map suppliedLeg [1 .. maxLegs - 4]
+    (enactArg "combo" [e.arbiter]) with legs = map suppliedLeg [1 .. referenceLimits.maxLegs - 4]
   case result.output of
     CL.ConditionalLockResult_Enacted receiverOutputs [] (Some next) -> do
-      length receiverOutputs === maxLegs
+      length receiverOutputs === referenceLimits.maxLegs
       Some view <- queryInterfaceContractId e.alice next
       view.terms.amount === terms.amount - 8.0
     _ -> abort "expected combined leg release at the limit"
@@ -144,8 +144,8 @@ test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
   e <- setup ()
   let oneGuardAlt = CL.Alternative [CL.Guard_Parties [e.arbiter] 1]
   let altsRule n = CL.Rule "alts" [e.arbiter] (map (const oneGuardAlt) [1 .. n]) CL.Outcome_Unlock
-  let atLimitAlts = (termsFor e) with rules = [altsRule maxAlternativesPerRule]
-  let overLimitAlts = atLimitAlts with rules = [altsRule (maxAlternativesPerRule + 1)]
+  let atLimitAlts = (termsFor e) with rules = [altsRule referenceLimits.maxAlternativesPerRule]
+  let overLimitAlts = atLimitAlts with rules = [altsRule (referenceLimits.maxAlternativesPerRule + 1)]
   inputAlts <- mint atLimitAlts atLimitAlts.amount
   fAlts <- factory e.rulesA atLimitAlts "alt-count"
   failsBecause (actAs [e.alice] <> readAs [e.adminA]) "invalid or oversized guards" $ exerciseCmd fAlts $
@@ -156,8 +156,8 @@ test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
 
   let guardsRule n = CL.Rule "guards" [e.arbiter]
         [CL.Alternative (map (const (CL.Guard_Parties [e.arbiter] 1)) [1 .. n])] CL.Outcome_Unlock
-  let atLimitGuards = (termsFor e) with rules = [guardsRule maxGuardsPerAlternative]
-  let overLimitGuards = atLimitGuards with rules = [guardsRule (maxGuardsPerAlternative + 1)]
+  let atLimitGuards = (termsFor e) with rules = [guardsRule referenceLimits.maxGuardsPerAlternative]
+  let overLimitGuards = atLimitGuards with rules = [guardsRule (referenceLimits.maxGuardsPerAlternative + 1)]
   inputGuards <- mint atLimitGuards atLimitGuards.amount
   fGuards <- factory e.rulesA atLimitGuards "guard-count"
   -- Same message as the alternatives case above: `validAlternatives` bounds both.
@@ -189,10 +189,10 @@ test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
 test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected : Script ()
 test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
   e <- setup ()
-  extraParties <- forA [1 .. maxNamedParties + 1] (\n -> allocateParty ("cl-named-" <> show n))
+  extraParties <- forA [1 .. referenceLimits.maxNamedParties + 1] (\n -> allocateParty ("cl-named-" <> show n))
   let namedRule ps = CL.Rule "unlock" ps (alt (CL.Guard_Parties [head ps] 1)) CL.Outcome_Unlock
-  let atLimitTerms = (termsFor e) with rules = [namedRule (take maxNamedParties extraParties)]
-  let overLimitTerms = atLimitTerms with rules = [namedRule (take (maxNamedParties + 1) extraParties)]
+  let atLimitTerms = (termsFor e) with rules = [namedRule (take referenceLimits.maxNamedParties extraParties)]
+  let overLimitTerms = atLimitTerms with rules = [namedRule (take (referenceLimits.maxNamedParties + 1) extraParties)]
   input <- mint atLimitTerms atLimitTerms.amount
   f <- factory e.rulesA atLimitTerms "named-party-count"
   failsBecause (actAs [e.alice] <> readAs [e.adminA]) "at most max-named-parties named parties" $ exerciseCmd f $
@@ -200,17 +200,17 @@ test_namedPartyCountAtTheLimitIsAcceptedAndOverTheLimitRejected = do
   result <- submit (actAs [e.alice] <> readAs [e.adminA]) $ exerciseCmd f $
     CL.ConditionalLockFactory_Lock atLimitTerms [input] [e.alice] extra
   _ <- asLocked result
-  length (namedParties atLimitTerms) === maxNamedParties
+  length (namedParties atLimitTerms) === referenceLimits.maxNamedParties
 
 -- CIP section 3.8: min-duration and max-duration bound `expiresAt`.
 test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected : Script ()
 test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected = do
   e <- setup ()
   let base = (termsFor e) with rules = []
-  let atMin = base with expiresAt = e.now `addRelTime` minDuration
-  let underMin = base with expiresAt = e.now `addRelTime` (minDuration - convertMicrosecondsToRelTime 1)
-  let atMax = base with expiresAt = e.now `addRelTime` maxDuration
-  let overMax = base with expiresAt = e.now `addRelTime` (maxDuration + seconds 1)
+  let atMin = base with expiresAt = e.now `addRelTime` referenceLimits.minDuration
+  let underMin = base with expiresAt = e.now `addRelTime` (referenceLimits.minDuration - convertMicrosecondsToRelTime 1)
+  let atMax = base with expiresAt = e.now `addRelTime` referenceLimits.maxDuration
+  let overMax = base with expiresAt = e.now `addRelTime` (referenceLimits.maxDuration + seconds 1)
 
   inputMin <- mint atMin atMin.amount
   fMin <- factory e.rulesA atMin "min-duration"

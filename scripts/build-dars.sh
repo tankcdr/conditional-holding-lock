@@ -8,6 +8,7 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 
 packages=(
   packages/splice-api-token-conditional-lock-v1
+  packages/conditional-lock-utils
   packages/conditional-lock-test-token
   packages/conditional-lock-test
 )

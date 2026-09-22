@@ -26,11 +26,18 @@ required = {
     "TestWorkedExamples:test_example_vesting",
     "TestWorkedExamples:test_example_collateral",
     "TestWorkedExamples:test_example_conditionalPayment",
+    "TestPolicyLimits:test_cipFloorsAreSatisfied",
+    "TestPolicyLimits:test_belowCipFloorIsRejected",
+    "TestPolicyLimits:test_limitsMetadataMatchesAdvertised",
+    "TestPolicyLimits:test_limitsRoundTripThroughMetadata",
+    "TestPolicyLimits:test_limitsFromMetadataRejectsMalformed",
+    "TestPolicyLimits:test_witnessPreimageBoundIsEnforced",
+    "TestRegistryLimits:test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
 }
 if version != config["canton"] or not required.issubset(results) or any("result" not in r for r in results.values()):
     raise SystemExit("Runtime mismatch, missing core proofs, or failed scripts; see " + str(run))
 artifacts = []
-for package in ("splice-api-token-conditional-lock-v1", "conditional-lock-test-token", "conditional-lock-test"):
+for package in ("splice-api-token-conditional-lock-v1", "conditional-lock-utils", "conditional-lock-test-token", "conditional-lock-test"):
     path = ROOT / f"packages/{package}/.daml/dist/{package}-1.0.0.dar"
     with zipfile.ZipFile(path) as archive:
         manifest = archive.read("META-INF/MANIFEST.MF").decode().replace("\r\n ", "").replace("\n ", "")
