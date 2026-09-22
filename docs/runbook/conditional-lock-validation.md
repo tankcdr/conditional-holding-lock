@@ -2,6 +2,8 @@
 
 Evaluation date: **September 22, 2026**. This report covers the reference interface and registry adapter: worked-example lifecycles, approver authority, atomic settlement, event reporting, byte-domain hashing, and compatibility with the pinned Canton runtimes.
 
+This report answers "does the reference implementation work, and against what". It is not the adoption path: if you want to depend on these packages from your own project, read [docs/adoption.md](../adoption.md) instead.
+
 ## Environment and compatibility
 
 | Component | Observed configuration | Assessment |

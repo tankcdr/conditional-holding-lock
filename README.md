@@ -85,6 +85,8 @@ python3 scripts/check-compatibility.py
 | `fixtures/runtime-versions.json`                 | Network runtime snapshots and official Canton archive checksums                                                                  |
 | `CHANGELOG.md`                                   | Release history, build inputs, and package identity per release                                                                  |
 | `docs/release-notes/`                            | GitHub Release notes for each tagged version                                                                                     |
+| `docs/adoption.md`                               | Consumer adoption guide: dependency sets, verification, registry/application/wallet paths, compatibility                          |
+| `docs/quickstart/`                               | The minimal consumer project `scripts/quickstart-check.sh` builds and runs end to end                                            |
 | `localnet/`, `localnet-overrides/`               | Legacy cn-quickstart Splice layout, separate from the proof matrix                                                               |
 
 Splice source and downloaded DARs are never committed here. A future Splice implementation PR belongs on a Splice fork.
@@ -92,6 +94,10 @@ Splice source and downloaded DARs are never committed here. A future Splice impl
 ## Releases
 
 Releases are cut from a `v<version>` git tag, starting at `v0.1.0`; the Daml packages keep `version: 1.0.0` in `daml.yaml`. The three consumer DARs are attached to the GitHub Release, and the generated `conditional-lock-release.json` manifest is attached alongside them. Release mechanics live in two files and nowhere else: [CHANGELOG.md](CHANGELOG.md) for the per-release history, the versioning rule, and package identity, and [docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the release body. `just release-dry-run <version>` runs every release check except the clean-worktree and tag-exists guards, and never tags.
+
+## Adopting the DARs
+
+[docs/adoption.md](docs/adoption.md) is the document for someone outside this repository: it takes a registry, an application, or a wallet from an empty project to a working conditional lock against the released DARs, without waiting for Splice to merge the interface. It covers which of the four packages to depend on, how to fetch and verify them, the `daml.yaml` each audience writes, the wallet's OpenAPI surface, and what re-pinning costs while this is `0.x`. `just quickstart` runs its end-to-end example on an isolated sandbox.
 
 ## Reference scope
 

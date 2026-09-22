@@ -62,6 +62,10 @@ check-pin:
 verify-reproducible:
     ./scripts/verify-reproducible.sh
 
+# Run the consumer quickstart end to end on an isolated sandbox.
+quickstart *dar_dir:
+    ./scripts/quickstart-check.sh "$@"
+
 # Cut a release: verify everything, write the manifest, and tag the commit.
 release version:
     if git rev-parse -q --verify "refs/tags/v{{version}}" >/dev/null; then echo "Tag v{{version}} already exists" >&2; exit 1; fi

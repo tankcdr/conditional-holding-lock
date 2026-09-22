@@ -12,6 +12,7 @@
     "check:compatibility": "python3 ./scripts/check-compatibility.py",
     "check:pin": "python3 ./scripts/check-pin.py",
     "verify:reproducible": "./scripts/verify-reproducible.sh",
+    "quickstart": "./scripts/quickstart-check.sh",
     "release": "just release",
     "release:dry-run": "just release-dry-run",
     "check:vectors": "python3 ./scripts/generate-hash-vectors.py --check",
