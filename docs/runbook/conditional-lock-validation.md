@@ -31,7 +31,7 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The normal suite has 60 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
+The normal suite has 66 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
@@ -80,10 +80,12 @@ Seven deliberate faults were applied separately to temporary copies of the refer
 | Remove amendment funding conservation | `test_example_collateral` |
 | Report the wrong receiver side in a transfer event | `test_example_dvpBetweenRegistries` |
 
-The `worked_example_mutations` section of the [validation evidence](conditional-lock-validation-evidence.json) records the exact replacements, commands, and observed errors. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the adapter, and run the named script from the test package:
+The `worked_example_mutations` section of the [validation evidence](conditional-lock-validation-evidence.json) records the exact replacements, commands, and observed errors. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the policy and adapter packages, and run the named script from the test package:
 
 ```bash
-cd packages/conditional-lock-test-token
+cd packages/conditional-lock-utils
+dpm build
+cd ../conditional-lock-test-token
 dpm build
 cd ../conditional-lock-test
 dpm test --files daml/TestWorkedExamples.daml -p 'test_example_<name>'

@@ -2,11 +2,11 @@
 
 Apache-2.0 reference code for [CIP-TBD-Conditional-Holding-Lock](docs/cip/CIP-TBD-Conditional-Holding-Lock.md).
 
-This repository provides the interface package, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent approver authorization, one-step locking, and atomic two-registry settlement. See the [Conditional Holding Lock validation report](docs/runbook/conditional-lock-validation.md).
+This repository provides the interface package, a reference policy evaluator a registry can adopt on its own, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent approver authorization, one-step locking, and atomic two-registry settlement. See the [Conditional Holding Lock validation report](docs/runbook/conditional-lock-validation.md).
 
 ## Worked examples
 
-Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 60 Daml Scripts, including the 54 mechanics proofs.
+Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 66 Daml Scripts: 6 worked-example scripts, 54 mechanics proofs, and 6 policy-limit proofs.
 
 | CIP section 4 example | Named script | Mechanics proofs it relies on |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ dpm install 3.5.2
 ./scripts/test-compatibility.sh
 ```
 
-`test.sh` checks fixture consistency, builds all three Daml packages, runs the Daml Script suite on the IDE ledger, runs both Solidity hash tests, and compiles and tests the Solana hash program in LiteSVM. Foundry and Solana tools are required; neither proof is silently skipped. On macOS the scripts can select Homebrew's `openjdk@21` without changing your global Java installation. On other systems set `JAVA_HOME` to JDK 21.
+`test.sh` checks fixture consistency, builds all four Daml packages, runs the Daml Script suite on the IDE ledger, runs both Solidity hash tests, and compiles and tests the Solana hash program in LiteSVM. Foundry and Solana tools are required; neither proof is silently skipped. On macOS the scripts can select Homebrew's `openjdk@21` without changing your global Java installation. On other systems set `JAVA_HOME` to JDK 21.
 
 To run only the Solana proof, use `npm run test:solana` or `./scripts/test-solana.sh`. It executes the compiled SBF program against Agave 3.1.14 runtime dependencies in LiteSVM 0.9.1, checking both hashes against the same six fixtures used by Daml and Solidity. It also checks malformed lengths and accidental UTF-8 hex input. Tests use ephemeral in-memory accounts without an RPC endpoint or wallet file. See the [hash-vector runbook](docs/runbook/hash-vectors.md).
 
@@ -73,7 +73,8 @@ python3 scripts/check-compatibility.py
 | Path                                             | Purpose                                                                                                                          |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/splice-api-token-conditional-lock-v1/` | The three CIP interfaces and data types; only metadata-v1 and holding-v2 dependencies                                            |
-| `packages/conditional-lock-test-token/`          | First-party reference policy and TestTokenV2 adapter, including V1/V2 holding views and V2 events                                |
+| `packages/conditional-lock-utils/`               | Reference policy evaluator with guard evaluation, terms validation, and outcome resolution; adoptable without TestTokenV2        |
+| `packages/conditional-lock-test-token/`          | TestTokenV2 adapter with V1/V2 holding views and V2 events                                                                      |
 | `packages/conditional-lock-test/`                | Authority, lifecycle, atomicity, event, and hash proofs                                                                          |
 | `fixtures/hash-vectors.json`                     | Single source of reviewed hash vectors; Daml and Solidity generated fixtures are checked for drift; Rust reads the JSON directly |
 | `contracts/evm/`                                 | Solidity byte-domain reference and tests; no forge-std checkout needed                                                           |

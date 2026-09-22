@@ -5,8 +5,8 @@ module ConditionalLock.Policy where
 -- | Reference evaluator for `splice-api-token-conditional-lock-v1`: guard
 -- evaluation, terms validation, and outcome resolution, over the interface
 -- types alone. It depends only on `metadata-v1`, `holding-v2`, and the
--- interface package, so a registry can adopt it without taking the TestTokenV2
--- adapter, and with it the test issuer, as a dependency.
+-- interface package, so a registry can adopt it without taking the reference
+-- test-token adapter, and with it a test issuer, as a dependency.
 --
 -- This is reference code, not a conformance oracle. A registry MAY implement
 -- the guards differently and still conform to the CIP, provided the observable
