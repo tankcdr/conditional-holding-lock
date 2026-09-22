@@ -1,0 +1,160 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module EscrowedDvpDevNet where
+
+import DA.Assert
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 qualified as Token
+import ConditionalLock.TestToken qualified as Impl
+
+-- | CIP section 4, "Escrowed DvP with a dispute window": one set of
+-- `LockTerms` carries two rules, `settle` (Alice and Bob, jointly, before the
+-- deadline) and `award` (the arbiter, from the deadline to expiry). This
+-- script runs both paths against the same terms on a real, wall-clock
+-- ledger, against the TestTokenV2 reference registry.
+
+account : Party -> V2.Account
+account party = V2.Account (Some party) None ""
+
+extra : ExtraArgs
+extra = ExtraArgs emptyChoiceContext emptyMetadata
+
+-- | Evidence returned to the shell. Every identifier is `Text` so it survives
+-- `dpm script --output-file` as plain JSON; Daml Script does not hand back
+-- ledger update IDs (see scripts/record-reference-proof.py for how those are
+-- sourced separately).
+data Result = Result with
+    alice : Text
+    bob : Text
+    arbiter : Text
+    deadline : Text
+    settleEnactedAt : Text
+    awardEnactedAt : Text
+    settleLockCid : Text
+    settleOutputCids : [Text]
+    awardLockCid : Text
+    awardOutputCids : [Text]
+    settleGuards : Text
+    settleOutcome : Text
+    awardGuards : Text
+    awardOutcome : Text
+  deriving (Eq, Show)
+
+-- | Fund a fresh holding of `terms.amount` for `terms.authorizer`. Minting
+-- requires both the registry admin's and the authorizer's authority.
+mint : Party -> Party -> CL.LockTerms -> Script (ContractId V2.Holding)
+mint admin owner terms = do
+  cid <- submit (actAs [admin, owner]) $
+    createCmd $ Token.Token $
+      V2.HoldingView terms.authorizer terms.instrumentId terms.amount None emptyMetadata
+  pure (toInterfaceContractId cid)
+
+-- | Lock `terms` under a fresh lock ID and have Bob accept, returning the
+-- active lock and its backing holding.
+lockAndAccept
+  : ContractId Token.TokenRules -> Party -> Party -> Party -> Text -> CL.LockTerms
+  -> Script (ContractId CL.ConditionalLock, ContractId V2.Holding)
+lockAndAccept rules admin alice bob lockId terms = do
+  input <- mint admin alice terms
+  factoryCid <- submit admin $ createCmd (Impl.Factory admin rules lockId)
+  let factory : ContractId CL.ConditionalLockFactory
+      factory = toInterfaceContractId factoryCid
+  pending <- submit (actAs [alice] <> readAs [admin]) $ exerciseCmd factory $
+    CL.ConditionalLockFactory_Lock terms [input] [alice] extra
+  instructionCid <- case pending.output of
+    CL.ConditionalLockResult_Pending cid -> pure cid
+    _ -> abort "expected the lock to await bob's approval"
+  accepted <- submit bob $ exerciseCmd instructionCid $
+    CL.ConditionalLockInstruction_Accept (account bob) [bob] extra
+  case accepted.output of
+    CL.ConditionalLockResult_Locked cid [holding] -> pure (cid, holding)
+    _ -> abort "expected the lock to become active with a single backing holding"
+
+-- | The dispute window in seconds is the script's only parameter: a
+-- hardcoded deadline is the first thing that breaks against a real clock.
+referenceDeployment : Int -> Script Result
+referenceDeployment window = do
+  alice <- allocateParty "alice"
+  bob <- allocateParty "bob"
+  arbiter <- allocateParty "arbiter"
+  admin <- allocateParty "admin"
+  rules <- submit admin $ createCmd (Token.TokenRules admin)
+
+  now <- getTime
+  let instrumentId = V2.InstrumentId admin "X"
+      deadline = now `addRelTime` seconds window
+      expiresAt = deadline `addRelTime` hours 1
+      requestedAt = now `addRelTime` seconds (-1)
+      amount = 100.0
+      settleRule = CL.Rule "settle" [alice, bob]
+        [CL.Alternative [CL.Guard_Parties [alice, bob] 2, CL.Guard_Before deadline]]
+        (CL.Outcome_Release [CL.Leg "delivery" (account bob) amount emptyMetadata] [])
+      awardRule = CL.Rule "award" [arbiter]
+        [CL.Alternative [CL.Guard_After deadline, CL.Guard_Parties [arbiter] 1]]
+        (CL.Outcome_Release [] [account alice, account bob])
+      terms = CL.LockTerms with
+        authorizer = account alice
+        instrumentId
+        amount
+        rules = [settleRule, awardRule]
+        expiresAt
+        requestedAt
+        meta = emptyMetadata
+
+  -- Settlement path: locked and accepted well before the deadline, enacted
+  -- jointly by Alice and Bob before it passes.
+  (settleLockCid, _) <- lockAndAccept rules admin alice bob "devnet-escrow-settle" terms
+  settleEnacted <- submit (actAs [alice, bob]) $ exerciseCmd settleLockCid $
+    CL.ConditionalLock_Enact "settle" [alice, bob] (CL.Witness []) [] extra
+  settleEnactedAt <- getTime
+  settleOutputCids <- case settleEnacted.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> do
+      Some token <- queryContractId bob (coerceContractId out : ContractId Token.Token)
+      token.holding.amount === amount
+      pure [out]
+    _ -> abort "expected the full amount released to bob before the deadline"
+
+  -- Dispute path: the SAME terms, locked a second time under a fresh lock
+  -- ID, waited out past the deadline under wall-clock time, and awarded by
+  -- the arbiter, split between Alice and Bob.
+  (awardLockCid, _) <- lockAndAccept rules admin alice bob "devnet-escrow-award" terms
+  sleep (seconds (window + 10))
+  let aliceShare = 60.0
+      bobShare = 40.0
+  awardEnacted <- submit arbiter $ exerciseCmd awardLockCid $
+    CL.ConditionalLock_Enact "award" [arbiter] (CL.Witness [])
+      [CL.Leg "arbiter-alice" (account alice) aliceShare emptyMetadata,
+       CL.Leg "arbiter-bob" (account bob) bobShare emptyMetadata] extra
+  awardEnactedAt <- getTime
+  awardOutputCids <- case awardEnacted.output of
+    CL.ConditionalLockResult_Enacted [bobOut] [aliceOut] None -> do
+      Some bobToken <- queryContractId bob (coerceContractId bobOut : ContractId Token.Token)
+      bobToken.holding.amount === bobShare
+      Some aliceToken <- queryContractId alice (coerceContractId aliceOut : ContractId Token.Token)
+      aliceToken.holding.amount === aliceShare
+      pure [bobOut, aliceOut]
+    _ -> abort "expected the amount split between alice and bob after the deadline"
+
+  pure Result with
+    alice = partyToText alice
+    bob = partyToText bob
+    arbiter = partyToText arbiter
+    deadline = show deadline
+    settleEnactedAt = show settleEnactedAt
+    awardEnactedAt = show awardEnactedAt
+    settleLockCid = show settleLockCid
+    settleOutputCids = map show settleOutputCids
+    awardLockCid = show awardLockCid
+    awardOutputCids = map show awardOutputCids
+    settleGuards = show settleRule.anyOf
+    settleOutcome = show settleRule.outcome
+    awardGuards = show awardRule.anyOf
+    awardOutcome = show awardRule.outcome
+
+-- | Runnable without an `--input-file`: the default 20-second dispute window.
+referenceDeploymentDefault : Script Result
+referenceDeploymentDefault = referenceDeployment 20

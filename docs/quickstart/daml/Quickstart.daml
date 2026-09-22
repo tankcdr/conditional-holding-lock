@@ -1,0 +1,72 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module Quickstart where
+
+import DA.Assert
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV2 qualified as V2
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import Splice.Testing.Tokens.TestTokenV2 qualified as Token
+import ConditionalLock.Policy (conformsToCip, referenceLimits)
+import ConditionalLock.TestToken qualified as Impl
+
+account : Party -> V2.Account
+account party = V2.Account (Some party) None ""
+
+-- | Lock a holding, have the receiver approve it, and let the arbiter release
+-- it. A minimal, self-contained tour of the conditional lock standard.
+quickstart : Script ()
+quickstart = do
+  alice <- allocateParty "alice"     -- authorizer: funds and later owns the lock
+  bob <- allocateParty "bob"         -- receiver: must approve before it locks
+  arbiter <- allocateParty "arbiter" -- enactor: releases the funds
+  admin <- allocateParty "admin"     -- registry admin
+  rules <- submit admin $ createCmd (Token.TokenRules admin)
+  now <- getTime
+  let instrumentId = V2.InstrumentId admin "X"
+      extra = ExtraArgs emptyChoiceContext emptyMetadata
+
+  input <- submit (actAs [admin, alice]) $
+    createCmd $ Token.Token $ V2.HoldingView (account alice) instrumentId 100.0 None emptyMetadata
+  let holdingCid : ContractId V2.Holding
+      holdingCid = toInterfaceContractId input
+
+  factoryCid <- submit admin $ createCmd (Impl.Factory admin rules "quickstart-lock")
+  let factory : ContractId CL.ConditionalLockFactory
+      factory = toInterfaceContractId factoryCid
+      terms = CL.LockTerms with
+        authorizer = account alice
+        instrumentId
+        amount = 100.0
+        rules = [CL.Rule "release" [arbiter] [CL.Alternative [CL.Guard_Parties [arbiter] 1]]
+          (CL.Outcome_Release [CL.Leg "payout" (account bob) 100.0 emptyMetadata] [])]
+        expiresAt = now `addRelTime` days 1
+        requestedAt = now `addRelTime` seconds (-1)
+        meta = emptyMetadata
+
+  pending <- submit (actAs [alice] <> readAs [admin]) $ exerciseCmd factory $
+    CL.ConditionalLockFactory_Lock terms [holdingCid] [alice] extra
+  instructionCid <- case pending.output of
+    CL.ConditionalLockResult_Pending cid -> pure cid
+    _ -> abort "expected the lock to await bob's approval"
+
+  accepted <- submit bob $ exerciseCmd instructionCid $
+    CL.ConditionalLockInstruction_Accept (account bob) [bob] extra
+  lockCid <- case accepted.output of
+    CL.ConditionalLockResult_Locked cid _ -> pure cid
+    _ -> abort "expected the lock to become active"
+
+  enacted <- submit arbiter $ exerciseCmd lockCid $
+    CL.ConditionalLock_Enact "release" [arbiter] (CL.Witness []) [] extra
+  case enacted.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> do
+      Some token <- queryContractId bob (coerceContractId out : ContractId Token.Token)
+      token.holding.amount === 100.0
+    _ -> abort "expected the full amount released to bob"
+
+  -- Client-side validation: check a registry's advertised limits against the
+  -- CIP floors before ever submitting terms against them.
+  assert (conformsToCip referenceLimits)
+  debug "quickstart: locked, approved by bob, and enacted 100.0 to bob"

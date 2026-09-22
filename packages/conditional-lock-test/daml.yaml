@@ -16,6 +16,7 @@ data-dependencies:
 - ../../.dars/splice-test-token-v2-1.0.1.dar
 - ../../.dars/splice-api-token-holding-v1-1.0.0.dar
 - ../../.dars/splice-api-token-transfer-events-v2-1.0.0.dar
+- ../conditional-lock-utils/.daml/dist/conditional-lock-utils-1.0.0.dar
 - ../conditional-lock-test-token/.daml/dist/conditional-lock-test-token-1.0.0.dar
 build-options:
   - --explicit-serializable=yes

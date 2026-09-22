@@ -477,12 +477,12 @@ test_guardsUseInclusiveAfterAndExclusiveBefore = do
   -- exclusive-Before boundary observable against the second alternative.
   let alternatives = [CL.Alternative [CL.Guard_After e.now, CL.Guard_Before e.now],
                       CL.Alternative [CL.Guard_After e.now, CL.Guard_Parties [e.arbiter] 1]]
-  assert (validAlternatives alternatives)
+  assert (validAlternatives referenceLimits alternatives)
   satisfied e.now [e.arbiter] noWitness alternatives === True
   satisfied e.now [] noWitness alternatives === False
   satisfied (e.now `addRelTime` seconds (-1)) [e.arbiter] noWitness alternatives === False
-  validAlternatives [] === False
-  validAlternatives [CL.Alternative []] === False
+  validAlternatives referenceLimits [] === False
+  validAlternatives referenceLimits [CL.Alternative []] === False
   validGuard (CL.Guard_Parties [e.alice, e.alice] 2) === False
   validGuard (CL.Guard_Parties [e.alice] 0) === False
 

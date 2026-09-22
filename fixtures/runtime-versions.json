@@ -1,19 +1,27 @@
 {
-  "checked_at": "2026-09-11",
+  "checked_at": "2026-09-22",
   "mainnet": {
-    "splice": "0.7.4",
-    "canton": "3.5.14",
+    "splice": "0.8.0",
+    "canton": "3.5.16",
     "sdk": "3.5.2",
     "info_url": "https://docs.global.canton.network.sync.global/info",
     "versions_url": "https://docs.global.canton.network.sync.global/app_dev/overview/version_information.html",
-    "canton_archive_sha256": "3bb2aba79e4704cc735dc7f1fcc0227fd9e0d85758eeff529faf63266c3ee0f5"
+    "canton_archive_sha256": "e6004023f81f8bff76da95a7e2dbca8ec74c3443141884f951d563ed3afa859d"
   },
   "testnet": {
-    "splice": "0.7.5",
-    "canton": "3.5.15",
+    "splice": "0.8.1",
+    "canton": "3.5.17",
     "sdk": "3.5.2",
     "info_url": "https://docs.test.global.canton.network.sync.global/info",
     "versions_url": "https://docs.test.global.canton.network.sync.global/app_dev/overview/version_information.html",
-    "canton_archive_sha256": "a11453d98917be6136cb2eaa3f800f5b67ee59ecff75907f7b59b4ccfd3766b8"
+    "canton_archive_sha256": "1b178105f429f0bb188fd4ccc22a9a19b79d236b829457cc870416f9277de93d"
+  },
+  "devnet": {
+    "splice": "0.8.3",
+    "canton": "3.5.18",
+    "sdk": "3.5.2",
+    "info_url": "https://docs.dev.global.canton.network.sync.global/info",
+    "versions_url": "https://docs.dev.global.canton.network.sync.global/app_dev/overview/version_information.html",
+    "informational": true
   }
 }

@@ -1,6 +1,8 @@
 # Conditional Holding Lock: validation and runtime compatibility
 
-Evaluation date: **September 18, 2026**. This report covers the reference interface and registry adapter: worked-example lifecycles, approver authority, atomic settlement, event reporting, byte-domain hashing, and compatibility with the pinned Canton runtimes.
+Evaluation date: **September 22, 2026**. This report covers the reference interface and registry adapter: worked-example lifecycles, approver authority, atomic settlement, event reporting, byte-domain hashing, and compatibility with the pinned Canton runtimes.
+
+This report answers "does the reference implementation work, and against what". It is not the adoption path: if you want to depend on these packages from your own project, read [docs/adoption.md](../adoption.md) instead.
 
 ## Environment and compatibility
 
@@ -12,16 +14,16 @@ Evaluation date: **September 18, 2026**. This report covers the reference interf
 | Foundry | 1.3.6, Solidity 0.8.24 | Both byte-domain hash algorithms tested |
 | Solana | Agave CLI/runtime dependencies 3.1.14, platform-tools v1.52, Rust 1.89.0, LiteSVM 0.9.1 | Compiled SBF program matches both hashes on the shared vectors in a local VM |
 | Existing shared Docker stack | Splice 0.6.7; Canton image 0.6.8 reports engine 3.5.4 | Older than the networks; owned by another checkout and left running |
-| Mainnet reference (pin dated 2026-09-11) | Splice 0.7.4 / Canton 3.5.14 / SDK 3.5.2 | Isolated local Ledger API matrix target; live mainnet has since moved to Splice 0.7.5 / Canton 3.5.15 |
-| Testnet reference (pin dated 2026-09-11) | Splice 0.7.5 / Canton 3.5.15 / SDK 3.5.2 | Isolated local Ledger API matrix target; live testnet has since moved to Splice 0.8.0 / Canton 3.5.16, which this matrix does not cover |
+| Mainnet reference (pin dated 2026-09-22) | Splice 0.8.0 / Canton 3.5.16 / SDK 3.5.2 | Isolated local Ledger API matrix target; matches live mainnet, `check-compatibility.py` reports no drift |
+| Testnet reference (pin dated 2026-09-22) | Splice 0.8.1 / Canton 3.5.17 / SDK 3.5.2 | Isolated local Ledger API matrix target; matches live testnet, `check-compatibility.py` reports no drift |
 
 The live sources are the [mainnet status](https://docs.global.canton.network.sync.global/info), [mainnet compiler/runtime information](https://docs.global.canton.network.sync.global/app_dev/overview/version_information.html), [testnet status](https://docs.test.global.canton.network.sync.global/info), and [testnet compiler/runtime information](https://docs.test.global.canton.network.sync.global/app_dev/overview/version_information.html). Use `python3 scripts/check-compatibility.py` to detect drift; a dated pin is not a promise about future network versions.
 
-The published DAR dependencies come from Splice main commit [`6b82367efb9ca6f94ced604ef9350280d05b334c`](https://github.com/canton-network/splice/tree/6b82367efb9ca6f94ced604ef9350280d05b334c). Its [Canton dependency settings](https://github.com/canton-network/splice/blob/6b82367efb9ca6f94ced604ef9350280d05b334c/project/CantonDependencies.scala) use Canton 3.5.15 and LF 2.1. [SPLICE_PIN](../../SPLICE_PIN) records all six published DAR checksums and package IDs. The interface package itself retains just its two specified Splice API dependencies.
+The published DAR dependencies come from Splice release tag [`0.8.1`](https://github.com/canton-network/splice/tree/0.8.1), commit `fb3c8c8a9259e98cdeb1cffc0cc77eaa7cc69e52`. Its [Canton dependency settings](https://github.com/canton-network/splice/blob/0.8.1/project/CantonDependencies.scala) use Canton 3.5.15 and LF 2.1. [SPLICE_PIN](../../SPLICE_PIN) records all six published DAR checksums and package IDs. The interface package itself retains just its two specified Splice API dependencies.
 
 ## Executable proofs
 
-**Result: PASS.** All 60 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
+**Result: PASS.** All 70 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.16 and 3.5.17. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
 
 Run from the repository root:
 
@@ -31,7 +33,7 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The normal suite has 60 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
+The normal suite has 70 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples, the ten `TestPolicyLimits` policy-limit proofs, and the on-ledger preimage-count proof. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
@@ -41,6 +43,9 @@ The normal suite has 60 Daml Scripts, two Solidity tests, and three Solana SBF t
 | Both actors can lock in one step | `test_oneStepBothActorsAndAuthorizerChange`; Alice and Bob act, no instruction remains, 100 is locked and 25 is returned from a 125 input; V1 and V2 views are checked |
 | Atomic settlement of two instruments | `test_atomicDvpAcrossTwoTestTokenV2Registries`; X and Y have distinct admins and TokenRules, and one submission contains exactly two root Enact exercises |
 | Atomic settlement also fails atomically | `test_atomicDvpRollsBackFirstEnactWhenSecondFails`; the second guard fails, both locks and backing holdings remain, neither payout exists, and the original contracts can then settle successfully together |
+| The advertised limits are the enforced limits | `TestPolicyLimits:test_cipFloorsAreSatisfied`, `test_belowCipFloorIsRejected`, `test_limitsMetadataMatchesAdvertised`, `test_eachLimitKeyCarriesItsOwnField`, `test_limitsRoundTripThroughMetadata`, `test_limitsFromMetadataRejectsMalformed`, `test_witnessPreimageBoundIsEnforced`; the CIP section 3.8 floors, the eight-key factory `meta` pinned byte for byte, each key pinned to its own field by a profile whose eight values differ, the parsing inverse, and fail-closed parsing of a malformed or oversized advertisement |
+| Every validator reads its bounds from its `Limits` argument | `TestPolicyLimits:test_pureValidatorsReadBoundsFromTheirArgument`, `test_legValidatorsReadBoundsFromTheirArgument`, `test_validateTermsReadsBoundsFromItsArgument`; each bound is exercised both below and above the reference value of 8, so reverting any validator to a literal fails |
+| The witness preimage bound is enforced on a live lock | `TestRegistryLimits:test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected`; the over-limit witness still carries the correct preimage |
 
 Additional proofs cover account-provider acceptance, sequential acceptance by multiple receivers, controller spoofing and duplicate threshold actors, rule consumption, conservation across partial releases and top-ups, bounded release, exact expiry, pending withdrawal, rejection, unanimous cancellation and amendment, prevention of spent-rule resurrection, malformed funding and terms and preimages, Keccak enactment, expired backing not spendable by the ordinary token path, both sides of V2 event reporting, two-alternative single firing, expiry always unlocking to the authorizer, combined fixed and enactor-supplied release legs, release and leg validation at creation and at amendment, leg identifier distinctness within and across locks, non-empty and forward-slash-free rule, leg, and lock identifiers, leg metadata on both transfer leg sides and reserved-key rejection, instruction and lock availableActions, authorizer-provider authorization at lock creation, the lock's signatory set, the rejection of enactor-supplied legs on an unlock, the eight advertised registry limits at and over each bound, and the enact and expire choice-observer functions.
 
@@ -80,10 +85,12 @@ Seven deliberate faults were applied separately to temporary copies of the refer
 | Remove amendment funding conservation | `test_example_collateral` |
 | Report the wrong receiver side in a transfer event | `test_example_dvpBetweenRegistries` |
 
-The `worked_example_mutations` section of the [validation evidence](conditional-lock-validation-evidence.json) records the exact replacements, commands, and observed errors. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the adapter, and run the named script from the test package:
+The `worked_example_mutations` section of the [validation evidence](conditional-lock-validation-evidence.json) records the exact replacements, commands, and observed errors. That snapshot predates the split of the policy evaluator into `conditional-lock-utils`: five of its seven recorded `source` paths still name `packages/conditional-lock-test-token/daml/ConditionalLock/Policy.daml`, and the file now lives at `packages/conditional-lock-utils/daml/ConditionalLock/Policy.daml`. Each recorded `before` snippet is still present there verbatim. The snapshot also records three artifacts where the run now produces four. It is regenerated by a full mutation campaign, not by `test-compatibility.sh`, so it is left as the historical record of the run it describes. To reproduce a check, apply its recorded replacement in a temporary copy of the repository, rebuild the policy and adapter packages, and run the named script from the test package:
 
 ```bash
-cd packages/conditional-lock-test-token
+cd packages/conditional-lock-utils
+dpm build
+cd ../conditional-lock-test-token
 dpm build
 cd ../conditional-lock-test
 dpm test --files daml/TestWorkedExamples.daml -p 'test_example_<name>'

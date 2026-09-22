@@ -1,8 +1,9 @@
 {
   "repository": "canton-network/splice",
-  "ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
-  "tracked_branch": "main",
-  "checked_at": "2026-09-11",
+  "ref": "0.8.1",
+  "tracked_release": "0.8.1",
+  "splice_release_commit": "fb3c8c8a9259e98cdeb1cffc0cc77eaa7cc69e52",
+  "checked_at": "2026-09-22",
   "sdk": "3.5.2",
   "lf": "2.1",
   "packages": [

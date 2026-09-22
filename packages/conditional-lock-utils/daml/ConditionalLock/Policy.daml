@@ -1,0 +1,370 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module ConditionalLock.Policy where
+
+-- | Reference evaluator for `splice-api-token-conditional-lock-v1`: guard
+-- evaluation, terms validation, and outcome resolution, over the interface
+-- types alone. It depends only on `metadata-v1`, `holding-v2`, and the
+-- interface package, so a registry can adopt it without taking the reference
+-- test-token adapter, and with it a test issuer, as a dependency.
+--
+-- This is reference code, not a conformance oracle. A registry MAY implement
+-- the guards differently and still conform to the CIP, provided the observable
+-- behaviour matches CIP sections 3.5 and 3.6. Depending on this package is not
+-- a conformance claim.
+
+import DA.List (dedup)
+import DA.Foldable (forA_)
+import DA.Optional (isSome, optionalToList)
+import DA.Text qualified as Text
+import DA.TextMap qualified as TextMap
+import DA.Crypto.Text qualified as Crypto
+import DA.Time
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV2
+import Splice.Api.Token.ConditionalLockV1
+
+-- This reference registry requires both owner and provider, when present.
+-- No standing preapprovals or mutable account-policy configuration are used.
+accountParties : Account -> [Party]
+accountParties account = dedup (optionalToList account.owner <> optionalToList account.provider)
+
+outcomeReceivers : Outcome -> [Account]
+outcomeReceivers Outcome_Unlock = []
+outcomeReceivers (Outcome_Release fixedLegs receivers) = map (.receiver) fixedLegs <> receivers
+
+-- | The receivers of the terms: the accounts other than `authorizer` that appear
+-- as a `Leg.receiver` in any `fixedLegs` or in any `Outcome_Release.receivers`.
+-- These are the accounts whose approval this registry requires.
+termReceivers : LockTerms -> [Account]
+termReceivers terms = filter (/= terms.authorizer) $ dedup $
+  concatMap (outcomeReceivers . (.outcome)) terms.rules
+
+guardParties : Guard -> [Party]
+guardParties (Guard_Parties parties _) = parties
+guardParties _ = []
+
+ruleParties : Rule -> [Party]
+ruleParties rule = rule.enactors <> concatMap (concatMap guardParties . (.allOf)) rule.anyOf
+
+-- | The named parties of the terms: the parties of every receiver account, every
+-- party in any `Rule.enactors`, and every party in any `Guard_Parties.parties`,
+-- excluding the parties of `authorizer`.
+namedParties : LockTerms -> [Party]
+namedParties terms = filter (`notElem` accountParties terms.authorizer) $ dedup $
+  concatMap accountParties (termReceivers terms) <> concatMap ruleParties terms.rules
+
+-- | Lock holders for the backing holding (CIP section 3.4). The registry admin
+-- alone when the terms name no party besides the authorizer.
+lockHolders : LockTerms -> [Party]
+lockHolders terms =
+  if null (namedParties terms) then [terms.instrumentId.admin] else namedParties terms
+
+authorized : [Party] -> [Party] -> Bool
+authorized required actors = all (`elem` actors) required
+
+requireActors : Text -> [Party] -> [Party] -> Update ()
+requireActors label required actors = assertMsg label (authorized required actors)
+
+prefix : Text
+prefix = "splice.lfdecentralizedtrust.org/"
+
+metadata : [(Text, Text)] -> Metadata
+metadata = Metadata . TextMap.fromList
+
+resultMetadata : Text -> Text -> Metadata
+resultMetadata kind reason = metadata [(prefix <> "tx-kind", kind), (prefix <> "reason", reason)]
+
+-- | The bounds a registry advertises in its factory `meta` and enforces on the
+-- terms it accepts (CIP section 3.8). One record is the single source for both
+-- directions: `limitsMetadata` renders it, and every validator below reads its
+-- bounds from the `Limits` argument, so the advertised and the enforced value
+-- can no longer drift apart.
+--
+-- Construct with a `with` block rather than positionally; a later field
+-- addition would silently reinterpret a positional construction.
+data Limits = Limits with
+    maxRules : Int
+      -- ^ CIP section 3.8: MUST be at least 8.
+    maxLegs : Int
+      -- ^ Legs released by one enactment, and `Outcome_Release.receivers`.
+      -- CIP section 3.8: MUST be at least 8.
+    maxAlternativesPerRule : Int
+      -- ^ CIP section 3.8: MUST be at least 8.
+    maxGuardsPerAlternative : Int
+      -- ^ CIP section 3.8: MUST be at least 8.
+    maxPreimages : Int
+      -- ^ Maximum `Witness.preimages` length. CIP section 3.8: MUST be at
+      -- least 8. Enforced by `validWitness` at enactment, not on the terms:
+      -- the bound is on the evidence supplied, not on the guards written.
+    maxNamedParties : Int
+      -- ^ CIP section 3.8: MUST be at least 8.
+    minDuration : RelTime
+      -- ^ CIP section 3.8: SHOULD reflect the registry's submission delay.
+      -- No floor; the CIP states a SHOULD, not a MUST.
+    maxDuration : RelTime
+      -- ^ CIP section 3.8: MUST be at least 30 days.
+  deriving (Eq, Show)
+
+-- | An example profile, not a default. These are the reference registry's own
+-- choices, and `minDuration = seconds 1` is a test issuer's value: CIP Security
+-- Considerations requires at least 24 hours for Canton Coin under CIP-0107. Any
+-- real registry MUST pick its own `minDuration` rather than adopt this one.
+referenceLimits : Limits
+referenceLimits = Limits with
+  maxRules = 8
+  maxLegs = 8
+  maxAlternativesPerRule = 8
+  maxGuardsPerAlternative = 8
+  maxPreimages = 8
+  maxNamedParties = 8
+  minDuration = seconds 1
+  maxDuration = days 365
+
+-- | True when `l` meets every CIP section 3.8 floor. A registry MAY exceed the
+-- floors; it MUST NOT go below them. `minDuration` carries a SHOULD rather than
+-- a MUST, so only its coherence with `maxDuration` is checked here.
+conformsToCip : Limits -> Bool
+conformsToCip l =
+  l.maxRules >= 8 && l.maxLegs >= 8 && l.maxAlternativesPerRule >= 8 &&
+  l.maxGuardsPerAlternative >= 8 && l.maxPreimages >= 8 && l.maxNamedParties >= 8 &&
+  l.maxDuration >= days 30 &&
+  l.minDuration >= convertMicrosecondsToRelTime 0 && l.minDuration <= l.maxDuration
+
+limitKey : Text -> Text
+limitKey key = prefix <> "conditional-lock/" <> key
+
+-- | Render `l` as the eight-key factory `meta` map CIP section 3.8 requires.
+limitsMetadata : Limits -> Metadata
+limitsMetadata l = metadata $ map (\(k, v) -> (limitKey k, v))
+  [ ("max-rules", show l.maxRules)
+  , ("max-legs", show l.maxLegs)
+  , ("max-alternatives-per-rule", show l.maxAlternativesPerRule)
+  , ("max-guards-per-alternative", show l.maxGuardsPerAlternative)
+  , ("max-preimages", show l.maxPreimages)
+  , ("max-named-parties", show l.maxNamedParties)
+  , ("min-duration", renderDuration l.minDuration)
+  , ("max-duration", renderDuration l.maxDuration) ]
+
+-- | Read a factory's advertised `meta` back into a `Limits`, for a wallet that
+-- validates terms client-side before submitting (CIP Security Considerations).
+-- `None` when any of the eight keys is absent or unparseable. Inverse of
+-- `limitsMetadata`: `limitsFromMetadata (limitsMetadata l) == Some l` for every
+-- `l` with non-negative integer fields whose durations are under
+-- `maxAdvertisedMicros`, which is every profile a registry could sanely
+-- advertise. Outside that domain it fails closed rather than overflowing or
+-- returning a half-read record.
+limitsFromMetadata : Metadata -> Optional Limits
+limitsFromMetadata meta = do
+  rules <- int "max-rules"
+  legs <- int "max-legs"
+  alternatives <- int "max-alternatives-per-rule"
+  guards <- int "max-guards-per-alternative"
+  preimages <- int "max-preimages"
+  parties <- int "max-named-parties"
+  low <- duration "min-duration"
+  high <- duration "max-duration"
+  pure Limits with
+    maxRules = rules
+    maxLegs = legs
+    maxAlternativesPerRule = alternatives
+    maxGuardsPerAlternative = guards
+    maxPreimages = preimages
+    maxNamedParties = parties
+    minDuration = low
+    maxDuration = high
+  where
+    value key = TextMap.lookup (limitKey key) meta.values
+    int key = value key >>= parseNat
+    duration key = value key >>= parseDuration
+
+microsPerSecond : Int
+microsPerSecond = 1000000
+
+microsPerDay : Int
+microsPerDay = 86400 * microsPerSecond
+
+-- | A non-empty run of at most 18 ASCII digits. `DA.Text.parseInt` alone would
+-- accept a sign and surrounding space, which an advertised limit must not
+-- carry, and a 19-digit numeral would sit at the edge of `Int`.
+parseNat : Text -> Optional Int
+parseNat t =
+  if t /= "" && Text.length t <= 18 && all (`elem` Text.explode "0123456789") (Text.explode t)
+    then Text.parseInt t
+    else None
+
+-- | Ten thousand years in microseconds: past any duration a registry could
+-- sanely advertise, and far enough below `Int`'s ceiling to leave headroom.
+maxAdvertisedMicros : Int
+maxAdvertisedMicros = 315360000000000000
+
+-- | Scale to microseconds, failing closed rather than overflowing. An advertised
+-- limit is untrusted input and `Int` overflow in Daml raises instead of
+-- returning, so an unguarded multiply would turn a hostile advertisement into an
+-- unhandled exception in the wallet doing the parsing, rather than a `None`.
+scaleMicros : Int -> Int -> Optional Int
+scaleMicros factor n =
+  if n > maxAdvertisedMicros / factor then None else Some (n * factor)
+
+-- | Canonical ISO-8601 duration: a whole number of days as `P<n>D`, otherwise
+-- whole seconds as `PT<n>S`, otherwise fractional seconds to microsecond
+-- precision. A negative duration takes a leading `-` (ISO 8601-2); no advertised
+-- limit is negative, but the sign is carried so the round trip holds there too.
+-- Not defined at the `Int` minimum, where `abs` has no representable result;
+-- no duration reachable from an advertised limit comes near it.
+renderDuration : RelTime -> Text
+renderDuration d =
+  let us = convertRelTimeToMicroseconds d
+      magnitude = abs us
+      body =
+        if magnitude > 0 && magnitude % microsPerDay == 0
+          then "P" <> show (magnitude / microsPerDay) <> "D"
+          else
+            let whole = magnitude / microsPerSecond
+                frac = magnitude % microsPerSecond
+            in "PT" <> (if frac == 0 then show whole else show whole <> "." <> pad6 frac) <> "S"
+  in (if us < 0 then "-" else "") <> body
+
+pad6 : Int -> Text
+pad6 n = Text.implode (replicate (6 - Text.length (show n)) "0") <> show n
+
+-- | Inverse of `renderDuration`. Accepts exactly the three forms it emits;
+-- combined designators such as `P1DT2H` are deliberately not accepted, so an
+-- unrecognised advertisement fails closed rather than being half-read.
+parseDuration : Text -> Optional RelTime
+parseDuration text = do
+  let negative = Text.isPrefixOf "-" text
+  body <- if negative then Text.stripPrefix "-" text else Some text
+  rest <- Text.stripPrefix "P" body
+  us <- case Text.stripPrefix "T" rest of
+    Some timePart -> do
+      seconds <- Text.stripSuffix "S" timePart
+      case Text.splitOn "." seconds of
+        [whole] -> parseNat whole >>= scaleMicros microsPerSecond
+        [whole, frac] ->
+          if Text.length frac /= 6 then None else do
+            w <- parseNat whole >>= scaleMicros microsPerSecond
+            f <- parseNat frac
+            pure (w + f)
+        _ -> None
+    None -> do
+      dayPart <- Text.stripSuffix "D" rest
+      parseNat dayPart >>= scaleMicros microsPerDay
+  pure (convertMicrosecondsToRelTime (if negative then negate us else us))
+
+-- | Keys the registry sets itself on an enactment, which a `Leg.meta` MUST NOT
+-- set (CIP section 3.7). `.../reason` is deliberately not reserved.
+reservedLegKey : Text -> Bool
+reservedLegKey key =
+  key == prefix <> "tx-kind" || Text.isPrefixOf (prefix <> "conditional-lock/") key
+
+isHex32 : Text -> Bool
+isHex32 t = Text.length t == 64 && all (`elem` Text.explode "0123456789abcdef") (Text.explode t)
+
+noSlash : Text -> Bool
+noSlash t = t /= "" && not (Text.isInfixOf "/" t)
+
+-- Validate before invoking the partial crypto builtins. They decode hex bytes;
+-- DA.Text.sha256 would hash the UTF-8 representation instead.
+hashPreimage : HashAlgorithm -> Text -> Optional Text
+hashPreimage algorithm preimage =
+  let normalized = Text.asciiToLower preimage
+  in if not (isHex32 normalized) then None else Some $ case algorithm of
+    Sha256 -> Crypto.sha256 normalized
+    Keccak256 -> Crypto.keccak256 normalized
+
+-- | Guard evaluation (CIP section 3.5). A rule is enactable when some alternative
+-- is satisfied, and an alternative is satisfied when every guard in `allOf` is.
+satisfied : Time -> [Party] -> Witness -> [Alternative] -> Bool
+satisfied now actors witness = any (all leaf . (.allOf))
+  where
+    leaf = \case
+      Guard_Preimage algorithm digest ->
+        any (\p -> hashPreimage algorithm p == Some digest) witness.preimages
+      Guard_After t -> now >= t
+      Guard_Before t -> now < t
+      Guard_Parties parties threshold ->
+        length (filter (`elem` actors) (dedup parties)) >= threshold
+
+validGuard : Guard -> Bool
+validGuard = \case
+  Guard_Preimage _ digest -> isHex32 digest
+  Guard_Parties parties threshold ->
+    parties == dedup parties && threshold >= 1 && threshold <= length parties
+  _ -> True
+
+validAlternatives : Limits -> [Alternative] -> Bool
+validAlternatives l alternatives =
+  not (null alternatives) && length alternatives <= l.maxAlternativesPerRule &&
+  all alternative alternatives
+  where
+    alternative a = not (null a.allOf) && length a.allOf <= l.maxGuardsPerAlternative &&
+      all validGuard a.allOf
+
+-- | The evidence bound of CIP section 3.8: `max-preimages` caps the length of
+-- the witness supplied at enactment, not the number of `Guard_Preimage` nodes
+-- in the terms. It is therefore enforced here and not in `validateTerms`, which
+-- never sees a `Witness`.
+validWitness : Limits -> Witness -> Bool
+validWitness l witness = length witness.preimages <= l.maxPreimages
+
+validAccount : Account -> Bool
+validAccount account = isSome account.owner
+
+validLeg : Leg -> Bool
+validLeg leg = noSlash leg.legId && validAccount leg.receiver && leg.amount > 0.0 &&
+  not (any (reservedLegKey . fst) (TextMap.toList leg.meta.values))
+
+-- | A leg set released by one enactment, or the fixed legs of one outcome.
+validLegs : Limits -> [Leg] -> Bool
+validLegs l legs = length legs <= l.maxLegs && all validLeg legs && dedup ids == ids
+  where ids = map (.legId) legs
+
+validOutcome : Limits -> Decimal -> Outcome -> Bool
+validOutcome _ _ Outcome_Unlock = True
+validOutcome l amount (Outcome_Release fixedLegs receivers) =
+  not (null fixedLegs && null receivers) &&
+  validLegs l fixedLegs && sum (map (.amount) fixedLegs) <= amount &&
+  receivers == dedup receivers && length receivers <= l.maxLegs && all validAccount receivers
+
+validateTerms : Limits -> Party -> Time -> LockTerms -> Update ()
+validateTerms l admin now terms = do
+  assertMsg "instrument admin must match factory" (terms.instrumentId.admin == admin)
+  assertMsg "authorizer must be a regular account" (validAccount terms.authorizer)
+  assertMsg "amount must be positive" (terms.amount > 0.0)
+  assertMsg "requestedAt must be in the past" (terms.requestedAt < now)
+  assertMsg "expiry must be within the advertised duration bounds" $
+    terms.expiresAt >= now `addRelTime` l.minDuration && terms.expiresAt <= now `addRelTime` l.maxDuration
+  assertMsg "at most max-rules rules" (length terms.rules <= l.maxRules)
+  let ids = map (.id) terms.rules
+  assertMsg "rule IDs must be unique, non-empty, and free of /" (dedup ids == ids && all noSlash ids)
+  forA_ terms.rules $ \r -> do
+    assertMsg "rule requires non-empty, duplicate-free enactors" $
+      not (null r.enactors) && dedup r.enactors == r.enactors
+    assertMsg "invalid or oversized guards" (validAlternatives l r.anyOf)
+    assertMsg "invalid rule outcome" (validOutcome l terms.amount r.outcome)
+  assertMsg "at most max-named-parties named parties" $
+    length (namedParties terms) <= l.maxNamedParties
+  -- The holding view is built on top of `terms.meta`, so the terms may not set a
+  -- key the registry is required to set either (CIP section 3.7).
+  assertMsg "terms metadata must not set a reserved key" $
+    not (any (reservedLegKey . fst) (TextMap.toList terms.meta.values))
+
+-- | The legs one enactment releases: the outcome's fixed legs together with the
+-- legs the enactor supplies (CIP section 3.6). `terms.amount` is the remaining
+-- amount, so the total released is bounded by it.
+resolveOutcome : Limits -> LockTerms -> Outcome -> [Leg] -> Update [Leg]
+resolveOutcome _ terms Outcome_Unlock supplied = do
+  assertMsg "an unlock admits no enactor-supplied legs" (null supplied)
+  pure [Leg "unlock" terms.authorizer terms.amount emptyMetadata]
+resolveOutcome l terms (Outcome_Release fixedLegs receivers) supplied = do
+  assertMsg "enactor-supplied legs require a non-empty receiver set" $
+    null supplied || not (null receivers)
+  assertMsg "receiver outside the agreed receiver set" $
+    all (\l -> l.receiver `elem` receivers) supplied
+  let legs = fixedLegs <> supplied
+  assertMsg "legs must be well formed, within max-legs, and have unique IDs" (validLegs l legs)
+  let total = sum (map (.amount) legs)
+  assertMsg "the release must be positive and funded by the remaining amount" $
+    total > 0.0 && total <= terms.amount
+  pure legs
