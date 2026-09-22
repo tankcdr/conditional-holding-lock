@@ -11,11 +11,20 @@
 # --network localnet (default): starts an isolated, wall-clock Canton sandbox
 #   pinned to the testnet runtime (Canton 3.5.17) and runs against it.
 # --network devnet: does not start anything. Requires LEDGER_JSON_API,
-#   LEDGER_HOST, and LEDGER_PORT from the environment (LEDGER_TOKEN passed
-#   through if set), and fails clearly, touching no network, if they are unset.
+#   LEDGER_HOST, and LEDGER_PORT from the environment. If LEDGER_TOKEN is also
+#   set, it is written to a mode-600 temp file and passed to `dpm script`
+#   as --access-token-file, and to the /v2/version probe as a bearer
+#   Authorization header; it is never echoed, logged, or written into the
+#   evidence. Fails clearly, touching no network and starting no sandbox, if
+#   LEDGER_JSON_API, LEDGER_HOST, or LEDGER_PORT are unset.
 #
 # --release <tag>: download the named GitHub release's DARs and manifest
 #   instead of building locally.
+#
+# --window <seconds>: dispute window for the settle/award reference script
+#   (default 20). Must be at least 15: the settle path needs headroom for
+#   five submissions to complete before the deadline, and wall-clock latency
+#   on a real participant is not the ~2s observed locally.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="${HOME}/.dpm/bin:${PATH}"
@@ -25,6 +34,19 @@ conditional_lock_java
 
 EXAMPLE_DIR="$ROOT/examples/devnet-escrow"
 EXAMPLE_DAR="$EXAMPLE_DIR/.daml/dist/conditional-lock-devnet-escrow-1.0.0.dar"
+
+# The three first-party release DAR filenames, from dar_identity.py's own
+# PACKAGES tuple, so a version bump there does not have to be echoed here.
+# The six Splice dependency DAR names below still come from SPLICE_PIN's
+# "packages" list, but that list carries no per-example selection, so which
+# three of the six this example needs stays a literal list.
+read -r CL_TOKEN_DAR CL_UTILS_DAR CL_TEST_TOKEN_DAR < <(python3 -c "
+import sys
+sys.path.insert(0, '$ROOT/scripts/lib')
+import dar_identity
+names = [dar_identity.built_dar_path(p).name for p, attached in dar_identity.PACKAGES if attached]
+print(*names)
+")
 
 network="localnet"
 release=""
@@ -60,6 +82,20 @@ case "$network" in
   *) echo "devnet-reference: --network must be localnet or devnet, got: $network" >&2; exit 1 ;;
 esac
 
+# The settle path needs headroom to complete five submissions before the
+# deadline; 2s was observed locally against a 20s window, but that margin is
+# not what wall-clock latency against a loaded, real participant looks like.
+if ! [[ "$window" =~ ^[0-9]+$ ]]; then
+  echo "devnet-reference: --window must be a non-negative integer number of seconds, got: $window" >&2
+  exit 1
+fi
+if (( window < 15 )); then
+  echo "devnet-reference: --window must be at least 15 seconds (got $window); the settle path" \
+    "needs headroom to complete five submissions before the deadline, and wall-clock latency" \
+    "against a real participant is not the ~2s seen locally against a static-time sandbox" >&2
+  exit 1
+fi
+
 # Fail fast, before touching any network, if devnet mode is missing what it needs.
 if [[ "$network" == "devnet" ]]; then
   if [[ -z "${LEDGER_JSON_API:-}" ]]; then
@@ -72,6 +108,23 @@ if [[ "$network" == "devnet" ]]; then
   fi
 fi
 
+# Token file: only ever created on the devnet branch, when LEDGER_TOKEN is
+# set. This trap is registered before any sandbox can be started (localnet
+# never reaches this branch), so it can never clobber
+# scripts/lib/sandbox.sh's own EXIT trap; see that file's header comment.
+token_file=""
+token_args=()
+auth_header=()
+if [[ "$network" == "devnet" && -n "${LEDGER_TOKEN:-}" ]]; then
+  token_file="$(mktemp)"
+  trap 'rm -f "$token_file"' EXIT
+  chmod 600 "$token_file"
+  printf '%s' "$LEDGER_TOKEN" > "$token_file"
+  token_args=(--access-token-file "$token_file")
+  auth_header=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
+fi
+
+mkdir -p "$ROOT/.localnet"
 run_dir="$(mktemp -d "$ROOT/.localnet/devnet-reference-$network.XXXXXX")"
 staging="$run_dir/dars"
 mkdir -p "$staging"
@@ -95,9 +148,9 @@ else
   echo "==> building local first-party packages"
   "$ROOT/scripts/build-dars.sh"
   cp "$ROOT/.dars/"*.dar "$staging/"
-  cp "$ROOT/packages/splice-api-token-conditional-lock-v1/.daml/dist/splice-api-token-conditional-lock-v1-1.0.0.dar" "$staging/"
-  cp "$ROOT/packages/conditional-lock-utils/.daml/dist/conditional-lock-utils-1.0.0.dar" "$staging/"
-  cp "$ROOT/packages/conditional-lock-test-token/.daml/dist/conditional-lock-test-token-1.0.0.dar" "$staging/"
+  cp "$ROOT/packages/splice-api-token-conditional-lock-v1/.daml/dist/$CL_TOKEN_DAR" "$staging/"
+  cp "$ROOT/packages/conditional-lock-utils/.daml/dist/$CL_UTILS_DAR" "$staging/"
+  cp "$ROOT/packages/conditional-lock-test-token/.daml/dist/$CL_TEST_TOKEN_DAR" "$staging/"
 fi
 
 echo "==> building examples/devnet-escrow"
@@ -105,10 +158,10 @@ rm -rf "$EXAMPLE_DIR/dars"
 mkdir -p "$EXAMPLE_DIR/dars"
 cp "$staging/splice-api-token-metadata-v1-1.0.0.dar" "$EXAMPLE_DIR/dars/"
 cp "$staging/splice-api-token-holding-v2-1.0.0.dar" "$EXAMPLE_DIR/dars/"
-cp "$staging/splice-api-token-conditional-lock-v1-1.0.0.dar" "$EXAMPLE_DIR/dars/"
+cp "$staging/$CL_TOKEN_DAR" "$EXAMPLE_DIR/dars/"
 cp "$staging/splice-test-token-v2-1.0.1.dar" "$EXAMPLE_DIR/dars/"
-cp "$staging/conditional-lock-utils-1.0.0.dar" "$EXAMPLE_DIR/dars/"
-cp "$staging/conditional-lock-test-token-1.0.0.dar" "$EXAMPLE_DIR/dars/"
+cp "$staging/$CL_UTILS_DAR" "$EXAMPLE_DIR/dars/"
+cp "$staging/$CL_TEST_TOKEN_DAR" "$EXAMPLE_DIR/dars/"
 ( cd "$EXAMPLE_DIR" && dpm build )
 
 sandbox_runtime=""
@@ -127,9 +180,9 @@ echo "==> deploying first-party release DARs"
 manifest_args=()
 if [[ -n "$manifest" ]]; then manifest_args=(--manifest "$manifest"); fi
 "$ROOT/scripts/deploy-dars.sh" ${manifest_args[@]+"${manifest_args[@]}"} \
-  "$staging/splice-api-token-conditional-lock-v1-1.0.0.dar" \
-  "$staging/conditional-lock-utils-1.0.0.dar" \
-  "$staging/conditional-lock-test-token-1.0.0.dar"
+  "$staging/$CL_TOKEN_DAR" \
+  "$staging/$CL_UTILS_DAR" \
+  "$staging/$CL_TEST_TOKEN_DAR"
 
 echo "==> deploying Splice dependency DARs and the example DAR"
 "$ROOT/scripts/deploy-dars.sh" \
@@ -141,12 +194,14 @@ echo "==> deploying Splice dependency DARs and the example DAR"
 echo "$window" > "$run_dir/input.json"
 
 echo "==> running the reference deployment (window=${window}s, wall-clock time)"
+# NEVER echo, log, or print LEDGER_TOKEN or the Authorization header.
 dpm script --dar "$EXAMPLE_DAR" \
   --script-name EscrowedDvpDevNet:referenceDeployment \
   --ledger-host "$LEDGER_HOST" --ledger-port "$LEDGER_PORT" \
-  --input-file "$run_dir/input.json" --output-file "$run_dir/script-output.json"
+  --input-file "$run_dir/input.json" --output-file "$run_dir/script-output.json" \
+  ${token_args[@]+"${token_args[@]}"}
 
-curl -fsS "$LEDGER_JSON_API/v2/version" > "$run_dir/ledger-version.json"
+curl -fsS ${auth_header[@]+"${auth_header[@]}"} "$LEDGER_JSON_API/v2/version" > "$run_dir/ledger-version.json"
 
 # Ledger update IDs: Daml Script returns choice results, not update IDs. The
 # JSON Ledger API /v2/updates route was not attempted in this slice (it would

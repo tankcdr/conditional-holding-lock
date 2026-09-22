@@ -15,6 +15,7 @@ if [[ ${#networks[@]} -eq 0 ]]; then networks=(mainnet testnet); fi
 
 run_network() (
   network="$1"
+  mkdir -p "$ROOT/.localnet"
   run_dir="$(mktemp -d "$ROOT/.localnet/compatibility-$network.XXXXXX")"
   # sandbox.sh registers the kill/wait traps itself, before its startup wait.
   conditional_lock_sandbox_start "$network" "$run_dir"

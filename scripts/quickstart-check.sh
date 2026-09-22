@@ -57,6 +57,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   exit 1
 fi
 
+mkdir -p "$ROOT/.localnet"
 run_dir="$(mktemp -d "$ROOT/.localnet/quickstart-$NETWORK.XXXXXX")"
 # sandbox.sh registers the kill/wait traps itself, before its startup wait.
 conditional_lock_sandbox_start "$NETWORK" "$run_dir"

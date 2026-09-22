@@ -24,14 +24,20 @@ def main():
     drift = []
     for name in ("mainnet", "testnet", "devnet"):
         config = expected[name]
-        info = json.loads(fetch(config["info_url"]))
-        page = html.unescape(re.sub("<[^>]+>", " ", fetch(config["versions_url"]).decode()))
-        page = " ".join(page.split())
-        canton = re.search(r"Canton version used for validator and SV nodes\s+(\d+\.\d+\.\d+)", page)
-        sdk = re.search(r"Daml SDK version used to compile\s+\.dars\s+(\d+\.\d+\.\d+)", page)
-        if not canton or not sdk:
-            raise SystemExit(f"Cannot parse authoritative {name} version information")
-        actual = {"splice": info["sv"]["version"], "canton": canton[1], "sdk": sdk[1]}
+        try:
+            info = json.loads(fetch(config["info_url"]))
+            page = html.unescape(re.sub("<[^>]+>", " ", fetch(config["versions_url"]).decode()))
+            page = " ".join(page.split())
+            canton = re.search(r"Canton version used for validator and SV nodes\s+(\d+\.\d+\.\d+)", page)
+            sdk = re.search(r"Daml SDK version used to compile\s+\.dars\s+(\d+\.\d+\.\d+)", page)
+            if not canton or not sdk:
+                raise SystemExit(f"Cannot parse authoritative {name} version information")
+            actual = {"splice": info["sv"]["version"], "canton": canton[1], "sdk": sdk[1]}
+        except (Exception, SystemExit) as exc:
+            if not config.get("informational"):
+                raise
+            report["networks"][name] = {"error": str(exc) or type(exc).__name__}
+            continue
         report["networks"][name] = actual
         for key, value in actual.items():
             if value != config[key] and not config.get("informational"):

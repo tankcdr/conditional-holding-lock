@@ -26,15 +26,21 @@ is a pull request, a commit, a demo recording, a blog post, or a generated evide
 
 | Date | Adopter | What was done | Network | Release tag | Interface package ID | Link or update IDs |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-09-22 | Long Run Advisory (this repository) | Escrowed DvP with a dispute window: the `settle` path enacted jointly by both counterparties before the deadline, and the arbiter's `award` path after it, from one set of `LockTerms` — two conditions, two outcomes, one pool of funds. Run under wall-clock time, not the static time the rest of the proof suite uses. | LocalNet (isolated Canton 3.5.17 sandbox, the Testnet runtime) | `unreleased` (commit `2e1c3c3`) | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-reference-evidence.json](runbook/localnet-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
+| 2026-09-22 | Long Run Advisory (this repository) | Escrowed DvP with a dispute window: the `settle` path enacted jointly by both counterparties before the deadline, and the arbiter's `award` path after it, from one set of `LockTerms` — two conditions, two outcomes, one pool of funds. Run under wall-clock time, not the static time the rest of the proof suite uses. | LocalNet (isolated Canton 3.5.17 sandbox, the Testnet runtime) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-reference-evidence.json](runbook/localnet-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
 | — | — | *pending a participant* | DevNet | — | — | — |
 
-The DevNet row is deliberately empty. The path is built and parameterized — `scripts/devnet-reference.sh
---network devnet` runs the same two-path example against a real participant the moment
-`LEDGER_JSON_API` and, if the participant requires auth, `LEDGER_TOKEN` are supplied — but no DevNet
-participant was available when this was written. Standing one up is validator onboarding, which is
-its own exercise and out of proportion to one log row. The LocalNet row proves the mechanics; the
-DevNet row will prove the network.
+The exact git commit, DAR digests, package IDs, and enactment timestamps for any reference-deployment row are in the linked evidence file, not transcribed into the table; the evidence file also records the deadline and the time each path was enacted, which lets a reader confirm the settle path ran before the deadline and the arbiter's award path after it, under wall-clock time.
+
+The DevNet row is deliberately empty. The path is built and parameterized; to run it against a real participant, set all of these:
+
+```bash
+LEDGER_JSON_API=https://<participant>/api/json \
+LEDGER_HOST=<participant-host> LEDGER_PORT=<port> \
+LEDGER_TOKEN=<oauth2-token> \
+./scripts/devnet-reference.sh --network devnet --release v0.1.0
+```
+
+The `v0.1.0` tag does not exist yet; use that form once the release is tagged. No DevNet participant was available when this was written. Standing one up is validator onboarding, which is its own exercise and out of proportion to one log row. The LocalNet row proves the mechanics; the DevNet row will prove the network.
 
 ## What you do not need
 

@@ -52,6 +52,25 @@ if [[ -n "${LEDGER_TOKEN:-}" ]]; then
   AUTH=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
 fi
 
+# emit_body <file>: print (to stderr) the first 200 bytes of a response body
+# with the literal LEDGER_TOKEN value redacted and any Authorization: line
+# dropped. This is the single implementation both failure paths below call;
+# the token is passed via the environment, never argv, so it never shows up
+# in `ps`.
+emit_body() {
+  LEDGER_TOKEN="${LEDGER_TOKEN:-}" python3 -c '
+import os, sys
+token = os.environ.get("LEDGER_TOKEN", "")
+data = sys.stdin.buffer.read()
+if token:
+    data = data.replace(token.encode(), b"***REDACTED***")
+lines = [l for l in data.split(b"\n") if b"authorization:" not in l.lower()]
+data = b"\n".join(lines)
+sys.stdout.buffer.write(data[:200])
+' < "$1" >&2
+  echo >&2
+}
+
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 
@@ -66,12 +85,24 @@ case "$version_status" in
   2??) ;;
   *)
     echo "deploy-dars: probe of $BASE/v2/version failed with status $version_status" >&2
-    head -c 200 "$body_file" >&2
-    echo >&2
+    emit_body "$body_file"
     exit 1
     ;;
 esac
-ledger_version="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' < "$body_file")"
+ledger_version="$(python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+if not isinstance(doc, dict) or "version" not in doc:
+    sys.exit(1)
+print(doc["version"])
+' < "$body_file")" || {
+  echo "deploy-dars: $BASE/v2/version did not return a JSON ledger version; is LEDGER_JSON_API pointing at a JSON Ledger API base URL?" >&2
+  emit_body "$body_file"
+  exit 1
+}
 
 if [[ -n "$manifest" ]]; then
   if [[ ! -f "$manifest" ]]; then
@@ -81,19 +112,29 @@ if [[ -n "$manifest" ]]; then
   for dar in "${darfiles[@]}"; do
     base_name="$(basename "$dar")"
     result="$(python3 -c '
-import hashlib, json, sys
+import json, sys, zipfile
+sys.path.insert(0, sys.argv[4])
+import dar_identity
 manifest = json.load(open(sys.argv[1]))
 name = sys.argv[2]
 dar_path = sys.argv[3]
 for pkg in manifest["packages"]:
     if pkg["file"] == name:
-        observed = hashlib.sha256(open(dar_path, "rb").read()).hexdigest()
+        try:
+            artifact = dar_identity.dar_artifact(name, dar_path)
+        except zipfile.BadZipFile:
+            print("BADZIP")
+            break
         print(pkg["dar_sha256"])
-        print(observed)
+        print(artifact["dar_sha256"])
         break
-' "$manifest" "$base_name" "$dar")"
+' "$manifest" "$base_name" "$dar" "$ROOT/scripts/lib")"
     if [[ -z "$result" ]]; then
       echo "deploy-dars: $base_name is not listed in manifest $manifest" >&2
+      exit 1
+    fi
+    if [[ "$result" == "BADZIP" ]]; then
+      echo "deploy-dars: $base_name is not a readable DAR (corrupt archive)" >&2
       exit 1
     fi
     expected_digest="$(echo "$result" | sed -n '1p')"
@@ -118,11 +159,8 @@ for dar in "${darfiles[@]}"; do
     2??|409) ;;
     *)
       echo "deploy-dars: upload of $dar failed with status $status" >&2
-      head -c 200 "$body_file" >&2
-      echo >&2
+      emit_body "$body_file"
       exit 1
       ;;
   esac
 done
-
-echo "deploy-dars: ledger version $ledger_version at $BASE"

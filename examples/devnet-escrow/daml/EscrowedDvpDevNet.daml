@@ -38,6 +38,10 @@ data Result = Result with
     settleOutputCids : [Text]
     awardLockCid : Text
     awardOutputCids : [Text]
+    settleGuards : Text
+    settleOutcome : Text
+    awardGuards : Text
+    awardOutcome : Text
   deriving (Eq, Show)
 
 -- | Fund a fresh holding of `terms.amount` for `terms.authorizer`. Minting
@@ -146,6 +150,10 @@ referenceDeployment window = do
     settleOutputCids = map show settleOutputCids
     awardLockCid = show awardLockCid
     awardOutputCids = map show awardOutputCids
+    settleGuards = show settleRule.anyOf
+    settleOutcome = show settleRule.outcome
+    awardGuards = show awardRule.anyOf
+    awardOutcome = show awardRule.outcome
 
 -- | Runnable without an `--input-file`: the default 20-second dispute window.
 referenceDeploymentDefault : Script Result
