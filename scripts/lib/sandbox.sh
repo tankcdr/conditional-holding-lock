@@ -5,8 +5,10 @@
 #
 # This function owns the cleanup traps. It registers them in the caller's shell
 # the moment the process exists, before the startup wait, so a signal during
-# startup cannot orphan a Canton JVM holding its ports. Callers that need extra
-# cleanup should do it in their own EXIT path after calling this.
+# startup cannot orphan a Canton JVM holding its ports. A shell has one EXIT
+# trap, so a caller that installs its own after calling this replaces the one
+# below and re-introduces the orphan: any such trap MUST itself call
+# conditional_lock_sandbox_stop.
 
 # conditional_lock_sandbox_start <network> <run_dir>
 #

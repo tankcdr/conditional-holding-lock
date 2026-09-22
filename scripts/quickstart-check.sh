@@ -39,14 +39,21 @@ fi
 
 # Fail on a missing DAR before paying for a sandbox, naming every one that is
 # absent, rather than dying on a raw compiler error twenty seconds later.
+required=()
+while IFS= read -r dar; do required+=("$dar"); done \
+  < <(sed -n 's|^[[:space:]]*-[[:space:]]*"\{0,1\}dars/||p' "$ROOT/docs/quickstart/daml.yaml" | tr -d '"')
+if [[ ${#required[@]} -eq 0 ]]; then
+  echo "Parsed no dars/ entries out of docs/quickstart/daml.yaml; the precondition check would silently pass." >&2
+  exit 1
+fi
 missing=()
-while IFS= read -r dar; do
+for dar in "${required[@]}"; do
   [[ -f "$QUICKSTART_DARS/$dar" ]] || missing+=("$dar")
-done < <(sed -n 's|^- dars/||p' "$ROOT/docs/quickstart/daml.yaml")
+done
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "Missing from ${DAR_DIR:-$QUICKSTART_DARS}, required by docs/quickstart/daml.yaml:" >&2
   printf '  %s\n' "${missing[@]}" >&2
-  echo "See docs/adoption.md section 2; the quickstart needs all six Splice DARs, not just the two an application needs." >&2
+  echo "See docs/adoption.md section 2; the quickstart needs more than the two Splice DARs an application compiles against." >&2
   exit 1
 fi
 

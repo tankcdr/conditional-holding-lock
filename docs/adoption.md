@@ -114,8 +114,8 @@ done
 ```
 
 Fetch all six even though an application compiles against only `metadata-v1` and `holding-v2`: the
-verification step below expects the full set, and so does the quickstart in section 6. This
-repository automates exactly that fetch — see
+verification step below checks the whole pinned dependency set, and a registry reading the reference
+adapter needs the rest. This repository automates exactly that fetch — see
 [`scripts/fetch-dars.sh`](../scripts/fetch-dars.sh), whose second line states the principle
 (`Fetch immutable, checksum-verified published DARs; never vendor Splice source`) and
 [`scripts/fetch-dars.py`](../scripts/fetch-dars.py), which builds the URL, checks the SHA-256, and
@@ -173,7 +173,7 @@ data-dependencies:
 - dars/splice-api-token-holding-v1-1.0.0.dar
 - dars/splice-api-token-holding-v2-1.0.0.dar
 - dars/splice-api-token-transfer-events-v2-1.0.0.dar
-# Your own token package goes here. The reference adapter uses Splice's TEST issuer:
+# Your own token package replaces the next line. The reference adapter uses Splice's TEST issuer:
 - dars/splice-test-token-v2-1.0.1.dar
 - dars/splice-token-standard-utils-2.0.0.dar
 # Conditional lock, from release v0.1.0
@@ -374,9 +374,12 @@ rather than buried:
 The quickstart goes from downloaded DARs to a lock that is created, approved, enacted, and asserted,
 on an isolated single-process Canton sandbox. No Docker, no network funds, no account on anything.
 
-The `dars/` directory must hold all nine files section 2 fetches — the three first-party DARs and
-all six Splice DARs — because the quickstart drives the reference registry over the test issuer. The
-script checks for them and names any that are missing before it starts a sandbox.
+The `dars/` directory section 2 builds has everything the quickstart needs. The quickstart itself
+compiles against six of those files — the three first-party DARs plus `metadata-v1`, `holding-v2`,
+and `splice-test-token-v2`, because it drives the reference registry over the test issuer. The
+authoritative list is the `data-dependencies` of
+[`docs/quickstart/daml.yaml`](quickstart/daml.yaml); the script reads that file, checks each entry,
+and names any that are missing before it starts a sandbox.
 
 ```bash
 # Against the DARs you downloaded in section 2:
