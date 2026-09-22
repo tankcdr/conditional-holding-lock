@@ -51,9 +51,20 @@ def parse_timestamp(value, label, script_output_path):
     if not value:
         raise SystemExit(f"{script_output_path}: {label} is missing; cannot check timestamp ordering")
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError as exc:
         raise SystemExit(f"{script_output_path}: {label} = {value!r} is not a parseable timestamp: {exc}")
+    # Reject a timezone-naive value rather than assuming UTC. Daml's Show always
+    # renders a trailing Z, so a naive timestamp means the field was edited by
+    # hand; assuming UTC would silently accept it, and mixing a naive value with
+    # an aware one would fail the ordering comparison with a TypeError traceback
+    # instead of the message every sibling check produces.
+    if parsed.tzinfo is None:
+        raise SystemExit(
+            f"{script_output_path}: {label} = {value!r} has no timezone offset; "
+            "the reference deployment records UTC timestamps ending in Z"
+        )
+    return parsed
 
 
 def check_contract_id(cid, label, script_output_path):

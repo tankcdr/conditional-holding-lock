@@ -29,9 +29,9 @@ is a pull request, a commit, a demo recording, a blog post, or a generated evide
 | 2026-09-22 | Long Run Advisory (this repository) | Escrowed DvP with a dispute window: the `settle` path enacted jointly by both counterparties before the deadline, and the arbiter's `award` path after it, from one set of `LockTerms` — two conditions, two outcomes, one pool of funds. Run under wall-clock time, not the static time the rest of the proof suite uses. | LocalNet (isolated Canton 3.5.17 sandbox, the Testnet runtime) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-reference-evidence.json](runbook/localnet-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
 | — | — | *pending a participant* | DevNet | — | — | — |
 
-The exact git commit, DAR digests, package IDs, and enactment timestamps for any reference-deployment row are in the linked evidence file, not transcribed into the table; the evidence file also records the deadline and the time each path was enacted, which lets a reader confirm the settle path ran before the deadline and the arbiter's award path after it, under wall-clock time.
+The exact git commit, DAR digests, and enactment timestamps for any reference-deployment row are in the linked evidence file, not transcribed into the table; the evidence file also records the deadline and the time each path was enacted, which lets a reader confirm the settle path ran before the deadline and the arbiter's award path after it, under wall-clock time. The interface package ID is the one value the table does carry, for the reason given above.
 
-The DevNet row is deliberately empty. The path is built and parameterized; to run it against a real participant, set all of these:
+The DevNet row is deliberately empty. The path is built and parameterized; to run it against a real participant, set the first three of these, and the token only if the participant requires authentication:
 
 ```bash
 LEDGER_JSON_API=https://<participant>/api/json \

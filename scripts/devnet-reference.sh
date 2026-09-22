@@ -12,11 +12,19 @@
 #   pinned to the testnet runtime (Canton 3.5.17) and runs against it.
 # --network devnet: does not start anything. Requires LEDGER_JSON_API,
 #   LEDGER_HOST, and LEDGER_PORT from the environment. If LEDGER_TOKEN is also
-#   set, it is written to a mode-600 temp file and passed to `dpm script`
-#   as --access-token-file, and to the /v2/version probe as a bearer
-#   Authorization header; it is never echoed, logged, or written into the
-#   evidence. Fails clearly, touching no network and starting no sandbox, if
-#   LEDGER_JSON_API, LEDGER_HOST, or LEDGER_PORT are unset.
+#   set, it is written to a mode-600 temp file and passed to `dpm script` as
+#   --access-token-file (dpm wants the bare token there), and a second
+#   mode-600 temp file holding the full "Authorization: Bearer <token>" header
+#   line is passed to curl's /v2/version probe via `-H @file`, so the token
+#   never appears in argv/`ps`. It is never echoed, logged, or written into
+#   the evidence. Fails clearly, touching no network and starting no sandbox,
+#   if LEDGER_JSON_API, LEDGER_HOST, or LEDGER_PORT are unset.
+#   LEDGER_TLS=1 and LEDGER_CACRT=<path>: opt-in, pure passthrough to `dpm
+#   script` as --tls / --cacrt <path> for a participant whose gRPC Ledger API
+#   is TLS-terminated. Not inferred from LEDGER_JSON_API's scheme, since the
+#   JSON API and the gRPC Ledger API are separate endpoints that can differ
+#   in TLS termination. UNTESTED in this environment: there is no participant
+#   here to exercise this path against, written but not exercised.
 #
 # --release <tag>: download the named GitHub release's DARs and manifest
 #   instead of building locally.
@@ -106,22 +114,43 @@ if [[ "$network" == "devnet" ]]; then
     echo "devnet-reference: --network devnet requires LEDGER_JSON_API, LEDGER_HOST, and LEDGER_PORT in the environment; LEDGER_HOST/LEDGER_PORT is unset" >&2
     exit 1
   fi
+  if [[ -n "${LEDGER_CACRT:-}" && ! -f "${LEDGER_CACRT}" ]]; then
+    echo "devnet-reference: LEDGER_CACRT is set but not a readable file: ${LEDGER_CACRT}" >&2
+    exit 1
+  fi
 fi
 
-# Token file: only ever created on the devnet branch, when LEDGER_TOKEN is
-# set. This trap is registered before any sandbox can be started (localnet
-# never reaches this branch), so it can never clobber
-# scripts/lib/sandbox.sh's own EXIT trap; see that file's header comment.
+# TLS passthrough for `dpm script`: opt-in only, pure passthrough, never
+# inferred from LEDGER_JSON_API's scheme (see header comment).
+tls_args=()
+if [[ -n "${LEDGER_TLS:-}" ]]; then
+  tls_args+=(--tls)
+fi
+if [[ -n "${LEDGER_CACRT:-}" ]]; then
+  tls_args+=(--cacrt "${LEDGER_CACRT}")
+fi
+
+# Token files: only ever created on the devnet branch, when LEDGER_TOKEN is
+# set. This trap is registered before any sandbox can be started (the
+# localnet branch below never reaches this code, and this branch and the
+# localnet sandbox-start branch are mutually exclusive on $network), so it
+# can never clobber scripts/lib/sandbox.sh's own EXIT trap; see that file's
+# header comment. Two files: `dpm script --access-token-file` wants the bare
+# token, curl's `-H @file` wants the full header line, and the token itself
+# must never sit in argv (visible via `ps`) either way.
 token_file=""
+header_file=""
 token_args=()
 auth_header=()
 if [[ "$network" == "devnet" && -n "${LEDGER_TOKEN:-}" ]]; then
   token_file="$(mktemp)"
-  trap 'rm -f "$token_file"' EXIT
-  chmod 600 "$token_file"
+  header_file="$(mktemp)"
+  trap 'rm -f "$token_file" "$header_file"' EXIT
+  chmod 600 "$token_file" "$header_file"
   printf '%s' "$LEDGER_TOKEN" > "$token_file"
+  printf 'Authorization: Bearer %s' "$LEDGER_TOKEN" > "$header_file"
   token_args=(--access-token-file "$token_file")
-  auth_header=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
+  auth_header=(-H "@${header_file}")
 fi
 
 mkdir -p "$ROOT/.localnet"
@@ -174,6 +203,11 @@ if [[ "$network" == "localnet" ]]; then
   export LEDGER_JSON_API="http://127.0.0.1:$CL_JSON_PORT"
   export LEDGER_HOST=127.0.0.1
   export LEDGER_PORT="$CL_LEDGER_PORT"
+  # The sandbox is unauthenticated. If the caller happens to have a real
+  # participant's bearer token exported, do not send it over the loopback
+  # connection: a credential that is never transmitted cannot be logged by
+  # something on the other end.
+  unset LEDGER_TOKEN
 fi
 
 echo "==> deploying first-party release DARs"
@@ -199,7 +233,8 @@ dpm script --dar "$EXAMPLE_DAR" \
   --script-name EscrowedDvpDevNet:referenceDeployment \
   --ledger-host "$LEDGER_HOST" --ledger-port "$LEDGER_PORT" \
   --input-file "$run_dir/input.json" --output-file "$run_dir/script-output.json" \
-  ${token_args[@]+"${token_args[@]}"}
+  ${token_args[@]+"${token_args[@]}"} \
+  ${tls_args[@]+"${tls_args[@]}"}
 
 curl -fsS ${auth_header[@]+"${auth_header[@]}"} "$LEDGER_JSON_API/v2/version" > "$run_dir/ledger-version.json"
 

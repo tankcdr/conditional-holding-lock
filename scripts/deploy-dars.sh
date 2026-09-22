@@ -47,16 +47,23 @@ done
 
 # NEVER echo, log, or print LEDGER_TOKEN or the Authorization header; do not
 # use set -x in this script.
+#
+# The header goes to curl via a mode-600 temp file (`-H @file`), not argv:
+# an argv value is visible to any local user via `ps -ww -ax -o command`,
+# a file path is not. body_file's existing EXIT trap below is extended to
+# also remove this header file; do not add a second EXIT trap.
 AUTH=()
+header_file=""
 if [[ -n "${LEDGER_TOKEN:-}" ]]; then
-  AUTH=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
+  header_file="$(mktemp)"
+  chmod 600 "$header_file"
+  printf 'Authorization: Bearer %s' "$LEDGER_TOKEN" > "$header_file"
+  AUTH=(-H "@${header_file}")
 fi
 
 # emit_body <file>: print (to stderr) the first 200 bytes of a response body
 # with the literal LEDGER_TOKEN value redacted and any Authorization: line
-# dropped. This is the single implementation both failure paths below call;
-# the token is passed via the environment, never argv, so it never shows up
-# in `ps`.
+# dropped. This is the single implementation both failure paths below call.
 emit_body() {
   LEDGER_TOKEN="${LEDGER_TOKEN:-}" python3 -c '
 import os, sys
@@ -72,7 +79,7 @@ sys.stdout.buffer.write(data[:200])
 }
 
 body_file="$(mktemp)"
-trap 'rm -f "$body_file"' EXIT
+trap 'rm -f "$body_file" "$header_file"' EXIT
 
 version_status="$(curl -sS -o "$body_file" -w '%{http_code}' \
   --connect-timeout 15 --max-time 60 \

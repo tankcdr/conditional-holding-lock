@@ -22,6 +22,16 @@ NETWORK="${NETWORK:-testnet}"
 DAR_DIR="${1:-}"
 QUICKSTART_DARS="$ROOT/docs/quickstart/dars"
 
+# The three first-party DAR filenames, from dar_identity.py's own PACKAGES
+# tuple, so a version bump there does not have to be echoed here.
+read -r CL_TOKEN_DAR CL_UTILS_DAR CL_TEST_TOKEN_DAR < <(python3 -c "
+import sys
+sys.path.insert(0, '$ROOT/scripts/lib')
+import dar_identity
+names = [dar_identity.built_dar_path(p).name for p, attached in dar_identity.PACKAGES if attached]
+print(*names)
+")
+
 rm -rf "$QUICKSTART_DARS"
 mkdir -p "$QUICKSTART_DARS"
 
@@ -32,9 +42,9 @@ else
   echo "==> building local first-party packages"
   "$ROOT/scripts/build-dars.sh"
   cp "$ROOT/.dars/"*.dar "$QUICKSTART_DARS/"
-  cp "$ROOT/packages/splice-api-token-conditional-lock-v1/.daml/dist/splice-api-token-conditional-lock-v1-1.0.0.dar" "$QUICKSTART_DARS/"
-  cp "$ROOT/packages/conditional-lock-utils/.daml/dist/conditional-lock-utils-1.0.0.dar" "$QUICKSTART_DARS/"
-  cp "$ROOT/packages/conditional-lock-test-token/.daml/dist/conditional-lock-test-token-1.0.0.dar" "$QUICKSTART_DARS/"
+  cp "$ROOT/packages/splice-api-token-conditional-lock-v1/.daml/dist/$CL_TOKEN_DAR" "$QUICKSTART_DARS/"
+  cp "$ROOT/packages/conditional-lock-utils/.daml/dist/$CL_UTILS_DAR" "$QUICKSTART_DARS/"
+  cp "$ROOT/packages/conditional-lock-test-token/.daml/dist/$CL_TEST_TOKEN_DAR" "$QUICKSTART_DARS/"
 fi
 
 # Fail on a missing DAR before paying for a sandbox, naming every one that is
@@ -64,9 +74,9 @@ conditional_lock_sandbox_start "$NETWORK" "$run_dir"
 
 echo "==> uploading consumer DARs in dependency order"
 LEDGER_JSON_API="http://127.0.0.1:$CL_JSON_PORT" "$ROOT/scripts/deploy-dars.sh" \
-  "$QUICKSTART_DARS/splice-api-token-conditional-lock-v1-1.0.0.dar" \
-  "$QUICKSTART_DARS/conditional-lock-utils-1.0.0.dar" \
-  "$QUICKSTART_DARS/conditional-lock-test-token-1.0.0.dar"
+  "$QUICKSTART_DARS/$CL_TOKEN_DAR" \
+  "$QUICKSTART_DARS/$CL_UTILS_DAR" \
+  "$QUICKSTART_DARS/$CL_TEST_TOKEN_DAR"
 
 echo "==> building the quickstart"
 (cd "$ROOT/docs/quickstart" && dpm build)
