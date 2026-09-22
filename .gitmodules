@@ -1,0 +1,3 @@
+[submodule "localnet"]
+	path = localnet
+	url = https://github.com/digital-asset/cn-quickstart.git
