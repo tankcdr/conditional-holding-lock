@@ -54,7 +54,7 @@ fi
 
 interface_id="$(awk -v pkg="splice-api-token-conditional-lock-v1" '$1 == pkg { print $2 }' "$second/ids.txt")"
 if [[ "$interface_id" != "$PINNED_INTERFACE_ID" ]]; then
-  echo "splice-api-token-conditional-lock-v1 package ID is $interface_id, expected pinned $PINNED_INTERFACE_ID (see Splice's daml/dars.lock); it must never change." >&2
+  echo "splice-api-token-conditional-lock-v1 package ID is $interface_id, expected pinned $PINNED_INTERFACE_ID (see daml/dars.lock on the proposed Splice branch, PR 7294); it must never change." >&2
   exit 1
 fi
 

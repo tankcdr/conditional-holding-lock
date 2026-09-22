@@ -16,11 +16,8 @@ if [[ ${#networks[@]} -eq 0 ]]; then networks=(mainnet testnet); fi
 run_network() (
   network="$1"
   run_dir="$(mktemp -d "$ROOT/.localnet/compatibility-$network.XXXXXX")"
+  # sandbox.sh registers the kill/wait traps itself, before its startup wait.
   conditional_lock_sandbox_start "$network" "$run_dir"
-  cleanup() { kill "$CL_SANDBOX_PID" 2>/dev/null || true; wait "$CL_SANDBOX_PID" 2>/dev/null || true; }
-  trap cleanup EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
   curl -fsS "http://127.0.0.1:$CL_JSON_PORT/v2/version" > "$run_dir/ledger-version.json"
   dpm script --dar "$DAR" --all --ledger-host 127.0.0.1 --ledger-port "$CL_LEDGER_PORT" \
     --static-time --upload-dar yes --json-test-summary "$run_dir/results.json" 2>&1 | tee "$run_dir/tests.log"

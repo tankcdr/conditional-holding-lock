@@ -76,6 +76,7 @@ release version:
     just verify-reproducible
     ./scripts/test.sh
     ./scripts/test-compatibility.sh
+    ./scripts/quickstart-check.sh
     python3 ./scripts/make-release-manifest.py "{{version}}"
     git tag -a "v{{version}}" -m "conditional-holding-lock v{{version}}"
 
@@ -83,6 +84,7 @@ release version:
 release-dry-run version: check-pin check-compatibility verify-reproducible
     ./scripts/test.sh
     ./scripts/test-compatibility.sh
+    ./scripts/quickstart-check.sh
     python3 ./scripts/make-release-manifest.py "{{version}}" --allow-dirty
 
 # Download and verify the pinned published Splice DARs.

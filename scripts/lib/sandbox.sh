@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Shared Canton sandbox launch: fetch the pinned binary, pick loopback ports,
 # start the sandbox in the background, and wait for it to publish its ports.
-# The caller owns the trap/cleanup around the exported CL_SANDBOX_PID.
+#
+# This function owns the cleanup traps. It registers them in the caller's shell
+# the moment the process exists, before the startup wait, so a signal during
+# startup cannot orphan a Canton JVM holding its ports. Callers that need extra
+# cleanup should do it in their own EXIT path after calling this.
 
 # conditional_lock_sandbox_start <network> <run_dir>
 #
@@ -11,10 +15,19 @@
 #   CL_LEDGER_PORT   Ledger API port
 #   CL_ADMIN_PORT    Admin API port
 #   CL_JSON_PORT     JSON Ledger API port
+# Kill the sandbox this library started. Idempotent.
+conditional_lock_sandbox_stop() {
+  [[ -n "${CL_SANDBOX_PID:-}" ]] || return 0
+  kill "$CL_SANDBOX_PID" 2>/dev/null || true
+  wait "$CL_SANDBOX_PID" 2>/dev/null || true
+}
+
 conditional_lock_sandbox_start() {
   local network="$1"
   local run_dir="$2"
-  local root="$ROOT"
+  # Default the repository root from this file's location rather than depending
+  # on a caller-set global, so a new caller cannot trip over `set -u`.
+  local root="${3:-${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}}"
   local binary ledger admin json sequencer seq_admin mediator attempt
 
   case "$network" in mainnet|testnet) ;; *) echo "Expected mainnet or testnet" >&2; return 1 ;; esac
@@ -40,20 +53,23 @@ PY
     --canton-port-file "$run_dir/ports.json" --log-file-name "$run_dir/canton.log" \
     --log-level-stdout WARN >"$run_dir/console.log" 2>&1 &
   CL_SANDBOX_PID=$!
+  # Register cleanup before the wait loop, not after it.
+  trap conditional_lock_sandbox_stop EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   for ((attempt = 0; attempt < 120; attempt++)); do
     [[ -f "$run_dir/ports.json" ]] && break
     if ! kill -0 "$CL_SANDBOX_PID" 2>/dev/null; then
       tail -60 "$run_dir/console.log" >&2
+      wait "$CL_SANDBOX_PID" 2>/dev/null || true
       return 1
     fi
     sleep 1
   done
   if [[ ! -f "$run_dir/ports.json" ]]; then
     echo "Canton startup timed out: $run_dir" >&2
-    # The caller has not registered a cleanup trap yet; do not leak the process.
-    kill "$CL_SANDBOX_PID" 2>/dev/null || true
-    wait "$CL_SANDBOX_PID" 2>/dev/null || true
+    conditional_lock_sandbox_stop
     return 1
   fi
 

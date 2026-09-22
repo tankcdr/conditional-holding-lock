@@ -27,7 +27,7 @@ mkdir -p "$QUICKSTART_DARS"
 
 if [[ -n "$DAR_DIR" ]]; then
   echo "==> populating quickstart DARs from $DAR_DIR"
-  cp "$DAR_DIR"/*.dar "$QUICKSTART_DARS/"
+  cp "$DAR_DIR"/*.dar "$QUICKSTART_DARS/" 2>/dev/null || true
 else
   echo "==> building local first-party packages"
   "$ROOT/scripts/build-dars.sh"
@@ -37,12 +37,22 @@ else
   cp "$ROOT/packages/conditional-lock-test-token/.daml/dist/conditional-lock-test-token-1.0.0.dar" "$QUICKSTART_DARS/"
 fi
 
+# Fail on a missing DAR before paying for a sandbox, naming every one that is
+# absent, rather than dying on a raw compiler error twenty seconds later.
+missing=()
+while IFS= read -r dar; do
+  [[ -f "$QUICKSTART_DARS/$dar" ]] || missing+=("$dar")
+done < <(sed -n 's|^- dars/||p' "$ROOT/docs/quickstart/daml.yaml")
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "Missing from ${DAR_DIR:-$QUICKSTART_DARS}, required by docs/quickstart/daml.yaml:" >&2
+  printf '  %s\n' "${missing[@]}" >&2
+  echo "See docs/adoption.md section 2; the quickstart needs all six Splice DARs, not just the two an application needs." >&2
+  exit 1
+fi
+
 run_dir="$(mktemp -d "$ROOT/.localnet/quickstart-$NETWORK.XXXXXX")"
+# sandbox.sh registers the kill/wait traps itself, before its startup wait.
 conditional_lock_sandbox_start "$NETWORK" "$run_dir"
-cleanup() { kill "$CL_SANDBOX_PID" 2>/dev/null || true; wait "$CL_SANDBOX_PID" 2>/dev/null || true; }
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 echo "==> uploading consumer DARs in dependency order"
 for dar in splice-api-token-conditional-lock-v1-1.0.0.dar conditional-lock-utils-1.0.0.dar conditional-lock-test-token-1.0.0.dar; do

@@ -43,7 +43,7 @@ Four first-party Daml packages are built from this repository. Three are attache
 | `splice-api-token-conditional-lock-v1` | always | `splice-api-token-metadata-v1`, `splice-api-token-holding-v2` |
 | `conditional-lock-utils` | you are a registry, or you want to validate terms client-side | the interface, plus the same two |
 | `conditional-lock-test-token` | you want a worked reference implementation to read | the above plus `holding-v1`, `transfer-events-v2`, `splice-test-token-v2`, `splice-token-standard-utils` |
-| `conditional-lock-test` | never | everything above, plus `daml-script` |
+| `conditional-lock-test` | never | the other three, the Splice DARs they need, plus `daml-script` |
 
 Two warnings that matter more than the table:
 
@@ -57,14 +57,19 @@ Two warnings that matter more than the table:
   and it is recorded in the release manifest with `"attached": false` so its absence is a decision
   rather than an oversight.
 
-The package IDs of the four packages as built for `v0.1.0`:
+The interface package ID, the one your contracts and your `data-dependencies` resolve against, is:
 
-| Package | Package ID |
-| --- | --- |
-| `splice-api-token-conditional-lock-v1` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` |
-| `conditional-lock-utils` | `02e296d5a8317990106aebc51db5b20e0f1391646e03d0d23d18b25e5b10e5d3` |
-| `conditional-lock-test-token` | `245c8e38d10ca6e3c74cd9b3a3ef770cdecf616cee5d096b405fe4d712e6844f` |
-| `conditional-lock-test` | `7a9bb8ba33e2a01eb233e2eec929e406b39f557be491a2f8816f231798f1ce65` |
+```
+splice-api-token-conditional-lock-v1  cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac
+```
+
+That value is checked on every build by `scripts/verify-reproducible.sh`. The IDs of the other
+three packages are not transcribed here, because a transcribed hash goes stale silently; read them
+from the release manifest instead, which is generated from the built DARs:
+
+```bash
+jq -r '.packages[] | "\(.package_id)  \(.file)"' conditional-lock-release.json
+```
 
 **A DAR's SHA-256 is download integrity; the package ID is package identity. Neither implies the
 other.** The same compiled package can ship as two DAR files with different digests — zip entry
@@ -73,9 +78,8 @@ compatibility, using package IDs. Section 7 gives the worked example. This is th
 the [release notes](release-notes/v0.1.0.md) make, in the same words, and it is the single fact
 that determines whether your integration survives a rebuild.
 
-Note the DAR **filenames** carry `1.0.0`, not the release version: `daml.yaml` `version` fields stay
-at `1.0.0` deliberately, because the version is an input to the package ID and the interface's ID is
-pinned upstream in Splice's `daml/dars.lock`. The release version lives in the tag.
+Note the DAR **filenames** carry `1.0.0`, not the release version. That is deliberate, and the
+reasons are in [CHANGELOG.md](../CHANGELOG.md) under "Versioning rule"; they are not restated here.
 
 ---
 
@@ -96,19 +100,22 @@ gh release download v0.1.0 --repo tankcdr/conditional-holding-lock \
 gh release download v0.1.0 --repo tankcdr/conditional-holding-lock \
   --pattern 'conditional-lock-release.json' --dir .
 
-# 2. The Splice DARs the release was built against, from the pinned Splice release tag.
+# 2. The six Splice DARs the release was built against, from the pinned Splice release tag.
 #    Splice tags on canton-network/splice are unprefixed; only that form resolves on raw.
 for f in splice-api-token-metadata-v1-1.0.0.dar \
-         splice-api-token-holding-v2-1.0.0.dar; do
+         splice-api-token-holding-v1-1.0.0.dar \
+         splice-api-token-holding-v2-1.0.0.dar \
+         splice-api-token-transfer-events-v2-1.0.0.dar \
+         splice-test-token-v2-1.0.1.dar \
+         splice-token-standard-utils-2.0.0.dar; do
   curl -fsSL "https://raw.githubusercontent.com/canton-network/splice/0.8.1/daml/dars/$f" \
     -o "dars/$f"
 done
 ```
 
-A registry or anyone reading the reference adapter additionally needs
-`splice-api-token-holding-v1-1.0.0.dar`, `splice-api-token-transfer-events-v2-1.0.0.dar`,
-`splice-test-token-v2-1.0.1.dar`, and `splice-token-standard-utils-2.0.0.dar` from the same URL
-pattern. This repository automates exactly that fetch — see
+Fetch all six even though an application compiles against only `metadata-v1` and `holding-v2`: the
+verification step below expects the full set, and so does the quickstart in section 6. This
+repository automates exactly that fetch — see
 [`scripts/fetch-dars.sh`](../scripts/fetch-dars.sh), whose second line states the principle
 (`Fetch immutable, checksum-verified published DARs; never vendor Splice source`) and
 [`scripts/fetch-dars.py`](../scripts/fetch-dars.py), which builds the URL, checks the SHA-256, and
@@ -120,19 +127,24 @@ dependency set is in `conditional-lock-release.json`. The first-party entries re
 `dar_sha256` and the Splice entries as `sha256`, so a single expected-digest listing reads both:
 
 ```bash
-jq -r '(.packages[] | "\(.dar_sha256)  dars/\(.file)"),
+jq -r '(.packages[] | select(.attached) | "\(.dar_sha256)  dars/\(.file)"),
        (.splice_dependencies[] | "\(.sha256)  dars/\(.file)")' \
   conditional-lock-release.json > expected.sha256
 shasum -a 256 -c expected.sha256
 ```
+
+The `select(.attached)` matters: the manifest also records `conditional-lock-test`, which is not a
+release asset and which you will not have downloaded. Without the filter the check reports it as a
+missing file and exits non-zero.
 
 This check is for **downloaded release assets**. Do not run it against DARs you built yourself: the
 package IDs reproduce, the file digests need not. The identity check that does hold for any build is
 the package ID:
 
 ```bash
-dpm inspect-dar dars/splice-api-token-conditional-lock-v1-1.0.0.dar
-# and compare against .packages[] | select(.file == "...") | .package_id
+dpm inspect-dar --json dars/splice-api-token-conditional-lock-v1-1.0.0.dar \
+  | jq -r .main_package_id
+# -> cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac
 ```
 
 ---
@@ -161,9 +173,9 @@ data-dependencies:
 - dars/splice-api-token-holding-v1-1.0.0.dar
 - dars/splice-api-token-holding-v2-1.0.0.dar
 - dars/splice-api-token-transfer-events-v2-1.0.0.dar
-- dars/splice-token-standard-utils-2.0.0.dar
 # Your own token package goes here. The reference adapter uses Splice's TEST issuer:
 - dars/splice-test-token-v2-1.0.1.dar
+- dars/splice-token-standard-utils-2.0.0.dar
 # Conditional lock, from release v0.1.0
 - dars/splice-api-token-conditional-lock-v1-1.0.0.dar
 - dars/conditional-lock-utils-1.0.0.dar
@@ -362,6 +374,10 @@ rather than buried:
 The quickstart goes from downloaded DARs to a lock that is created, approved, enacted, and asserted,
 on an isolated single-process Canton sandbox. No Docker, no network funds, no account on anything.
 
+The `dars/` directory must hold all nine files section 2 fetches — the three first-party DARs and
+all six Splice DARs — because the quickstart drives the reference registry over the test issuer. The
+script checks for them and names any that are missing before it starts a sandbox.
+
 ```bash
 # Against the DARs you downloaded in section 2:
 ./scripts/quickstart-check.sh dars/
@@ -398,8 +414,8 @@ What the script does, and what you would do by hand on your own participant:
 participant and one synchronizer with controlled time. `Guard_After` and `Guard_Before` behave very
 differently under wall-clock time on a real participant with a submission delay — which is the whole
 reason section 3.3 exists. Treat the quickstart as proof that your dependency set is right, not as
-proof that your timing is. The next step after it passes is a real network; see
-[docs/adoption-evidence.md](adoption-evidence.md).
+proof that your timing is. The next step after it passes is a real network, which is what the
+adoption evidence log below will cover — that document does not exist yet.
 
 ---
 
@@ -465,10 +481,11 @@ If you follow this document, the result is evidence the CIP thread needs. The op
 of the community is whether anyone would adopt an out-of-tree package before Splice merges it; a
 registry, an application, or a wallet that did is the concrete answer.
 
-- **[docs/adoption-evidence.md](adoption-evidence.md)** — the adoption evidence log. It will record
-  each observed adoption: who adopted which packages at which package IDs, on which network, what
-  they built, and what broke. It is also where the reference deployment on a real network is
-  recorded, which is the next step after the local quickstart of section 6.
+- **`docs/adoption-evidence.md`** — the adoption evidence log. **It does not exist yet**; it is the
+  next piece of work, and this is a forward reference, not a link. It will record each observed
+  adoption: who adopted which packages at which package IDs, on which network, what they built, and
+  what broke. It is also where the reference deployment on a real network is recorded, which is the
+  next step after the local quickstart of section 6.
 - **The Splice PR** — <https://github.com/canton-network/splice/pull/7294> is where the interface is
   proposed to Splice and where the CIP discussion lives. Adoption reports belong there too.
 - **This repository's issues** — <https://github.com/tankcdr/conditional-holding-lock/issues> for

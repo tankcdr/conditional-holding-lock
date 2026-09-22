@@ -12,7 +12,8 @@ the generated release manifest `conditional-lock-release.json`. The four first-p
 keep `version: 1.0.0` in their `daml.yaml`. A Daml-LF package ID is a content hash over the package
 name, its version, the LF version, the package IDs of its dependencies, and the serialized module
 ASTs, so bumping the version field would change the interface package ID — and that ID is pinned
-upstream in Splice's `daml/dars.lock`. The release version therefore moves in the tag while the
+in Splice's `daml/dars.lock` on the proposed branch of PR 7294 (not yet on Splice `main`). The
+release version therefore moves in the tag while the
 package coordinates stay still.
 
 ## [Unreleased]
