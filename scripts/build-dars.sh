@@ -9,7 +9,8 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 # The package list lives in scripts/lib/dar_identity.py (PACKAGES), which is
 # also what the manifest, the evidence, and the reproducibility check read, so
 # a package can never be built but left out of the release.
-mapfile -t packages < <(python3 -c "
+packages=()
+while IFS= read -r line; do packages+=("$line"); done < <(python3 -c "
 import sys
 sys.path.insert(0, '$ROOT/scripts/lib')
 import dar_identity
