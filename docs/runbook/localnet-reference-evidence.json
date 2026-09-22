@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-22T16:55:07.711108+00:00",
+  "checked_at": "2026-09-22T17:06:57.713006+00:00",
   "network_runtime": "localnet",
   "execution": "Escrowed DvP with a dispute window (settle and award) run against a live Canton participant under wall-clock time, funded and settled through the TestTokenV2 registry.",
   "release": "unreleased",
-  "git_commit": "2e1c3c3cfea599c9cec7e2248c0c8ba5c63ffbb6",
+  "git_commit": "9547fc5ac9389551bffdca54672f01f7631fc065",
   "splice_version_reference": "0.8.1",
   "splice_source_ref": "0.8.1",
   "canton_version_observed": "3.5.17",
@@ -33,23 +33,27 @@
       "rule": "settle",
       "guards": "allOf [Guard_Parties [alice, bob] 2, Guard_Before deadline]",
       "outcome": "Outcome_Release with fixedLegs = [Leg \"delivery\" bob amount]; receivers = []",
-      "lock_contract_id": "0079a7586c69b6fee2e5534cac1f117dca168445eee88fd5121156394c68fd1cfcca1212202be609734cedba99fb5f057e0170f36914731ad712e0efa3fbc9f2c9b8525127",
+      "lock_contract_id": "0009338c5aa2681b6741daf3f758876f6649f065c018a92b76ec9c6eb3a46717adca1212209ba8a8503adfcd533901826a300eca0f90a8d9dbc0aed56e316b1584bd77d454",
       "output_contract_ids": [
-        "00d95babbfb38ebd685ddc521cde187e5fe131d40ed520798434ea30cd6f3cadc9ca121220160950475f5ef2a2fda2ae2d944372fa6cb353866be8d21c2e2fbae6c22e8d54"
+        "0043718ce2f0fa370bd8f5e7c073ad925f65a7066ce60b9396c019820c009798edca12122014e9599e9f2dfadaf7eafa9505c09db8d859d8b0113d76f0fb9ef89361c2a3bc"
       ],
-      "update_ids": []
+      "update_ids": [],
+      "deadline": "2026-09-22T17:04:11.327960Z",
+      "enacted_at": "2026-09-22T17:03:13.162208Z"
     },
     {
       "name": "award",
       "rule": "award",
       "guards": "allOf [Guard_After deadline, Guard_Parties [arbiter] 1]",
       "outcome": "Outcome_Release with fixedLegs = []; receivers = [alice, bob]",
-      "lock_contract_id": "00242d7a8b0dbc1fd60d049f807d990453bbc9846144a1904636475258c45aaccaca1212206cd332c3409734bf52244a7ddc4bb60204c2c286e5a072beeca1dcf2e6d14127",
+      "lock_contract_id": "006347625afbf20c1f9d4fe552ecd3ae3f3686692f193a18e50233b5135908f5a9ca121220d08ed2d9b24a928dfc417b17bf4ce399dcdd445570ddb07f49229ec18cad174e",
       "output_contract_ids": [
-        "00852ab5f4ff1286c0464ff3206d3eef00afd96fb68e8f0d030b2831d18932b1f2ca121220a8819cc59e288505a68d1f027018cc887946e52c6668006281923a106dc82b1c",
-        "003bb3dbb29c5d701da9d8071ba4346c9d359e5e41fe6f84ab70200420cd13d5b2ca121220639b797ed735ed3e9f789d0a549ada58468c035fd94c410304c379d19b1ded7d"
+        "00f8dbc76aca0e7eb8f26b0c4bda88e0ad8a1e12fbff45f061a23dca77dfbbc08cca12122041c2e03c88d559e29f2ab6dba0cd44b6d8a44f40bc902a84c2cc67180378cb8a",
+        "00f1bdee196b2ead719a8206e4c39eb7550946f9c7b272a6f98e4a00f6325ab072ca12122005e6348af88b4644aef2d0147a0f59f8de7856a4456c0a40eb78bc81385d7d00"
       ],
-      "update_ids": []
+      "update_ids": [],
+      "deadline": "2026-09-22T17:04:11.327960Z",
+      "enacted_at": "2026-09-22T17:04:25.189992Z"
     }
   ],
   "update_id_source": "not captured; Daml Script does not return ledger update IDs, so contract IDs from the script's own return value are recorded instead",

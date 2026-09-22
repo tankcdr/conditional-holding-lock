@@ -126,7 +126,7 @@ fi
 echo "==> deploying first-party release DARs"
 manifest_args=()
 if [[ -n "$manifest" ]]; then manifest_args=(--manifest "$manifest"); fi
-"$ROOT/scripts/deploy-dars.sh" "${manifest_args[@]}" \
+"$ROOT/scripts/deploy-dars.sh" ${manifest_args[@]+"${manifest_args[@]}"} \
   "$staging/splice-api-token-conditional-lock-v1-1.0.0.dar" \
   "$staging/conditional-lock-utils-1.0.0.dar" \
   "$staging/conditional-lock-test-token-1.0.0.dar"
@@ -148,10 +148,11 @@ dpm script --dar "$EXAMPLE_DAR" \
 
 curl -fsS "$LEDGER_JSON_API/v2/version" > "$run_dir/ledger-version.json"
 
-# Ledger update IDs: Daml Script returns choice results, not update IDs, and
-# fetching them from the JSON Ledger API's /v2/updates route is not a
-# one-attempt operation against an unfamiliar participant. record-reference-proof.py
-# ships the contract IDs the script itself returned and records that honestly.
+# Ledger update IDs: Daml Script returns choice results, not update IDs. The
+# JSON Ledger API /v2/updates route was not attempted in this slice (it would
+# need probing this participant's schema first, more than the one attempt the
+# task allowed for it); record-reference-proof.py ships the contract IDs the
+# script itself returned instead and records that honestly.
 
 record_args=(--network "$network" --run-dir "$run_dir" --dar-dir "$staging")
 if [[ -n "$release" ]]; then record_args+=(--release "$release"); fi

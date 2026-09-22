@@ -69,10 +69,11 @@ def main():
         raise SystemExit(f"Missing {script_output_path}; the reference deployment did not run")
     result = json.loads(script_output_path.read_text())
 
+    deadline = result.get("deadline")
     paths = {}
-    for name, lock_key, outputs_key in (
-        ("settle", "settleLockCid", "settleOutputCids"),
-        ("award", "awardLockCid", "awardOutputCids"),
+    for name, lock_key, outputs_key, enacted_key in (
+        ("settle", "settleLockCid", "settleOutputCids", "settleEnactedAt"),
+        ("award", "awardLockCid", "awardOutputCids", "awardEnactedAt"),
     ):
         lock_cid = result.get(lock_key)
         output_cids = result.get(outputs_key)
@@ -87,6 +88,8 @@ def main():
             "lock_contract_id": lock_cid,
             "output_contract_ids": output_cids,
             "update_ids": [],
+            "deadline": deadline,
+            "enacted_at": result.get(enacted_key),
         }
 
     artifacts = []
