@@ -121,8 +121,9 @@ data Witness = Witness with
     preimages : [Text]
       -- ^ Hex-encoded 32-byte preimages. Each `Guard_Preimage` is satisfied if any
       -- listed preimage hashes to its digest. Registries advertise the maximum
-      -- length as `max-preimages`. Every choice observer of `ConditionalLock_Enact`
-      -- learns every listed preimage; see `conditionalLock_enactExtraObservers`.
+      -- length as `max-preimages` (CIP section 3.8). Every choice observer of
+      -- `ConditionalLock_Enact` learns every listed preimage; see
+      -- `conditionalLock_enactExtraObservers`.
   deriving (Eq, Ord, Show, Serializable)
 
 -- | A destination for locked funds.
@@ -236,9 +237,14 @@ data ConditionalLockResult_Output
       authorizerHoldingCids : [ContractId Holding]
         -- ^ Unlocked holdings returned to the authorizer.
       continuationCid : Optional (ContractId ConditionalLock)
-        -- ^ The continuing lock, when funds remain.
-  | ConditionalLockResult_Failed
-      -- ^ Instruction rejected or withdrawn; input holdings unlocked.
+        -- ^ The continuing lock, when funds remain. Its stakeholders follow from the
+        -- remaining terms, so an enactor named only by the rule just fired MAY be
+        -- unable to fetch it.
+  | ConditionalLockResult_Failed with
+      authorizerHoldingCids : [ContractId Holding]
+        -- ^ Instruction rejected or withdrawn. The unlocked holdings returned to the
+        -- authorizer. MAY be empty for registries that do not represent their
+        -- holdings on-ledger.
   deriving (Eq, Show, Serializable)
 ```
 
@@ -301,7 +307,7 @@ Rules:
 - The factory MUST also reject terms where any `Leg.meta` sets a key the registry is required to set (section 3.7).
 - The number of named parties MUST be within the advertised `max-named-parties` (section 3.8); registries whose lock representation bounds lock holders SHOULD set it to that bound.
 - **Receivers** and **named parties** are as defined on `LockTerms` (section 2).
-- Change holdings from the input holdings are reported in `ConditionalLockResult.authorizerChangeCids`, whatever the output.
+- Change holdings from the input holdings are reported in `ConditionalLockResult.authorizerChangeCids`, whatever the output. A rejected or withdrawn instruction returns the locked funds in `ConditionalLockResult_Failed.authorizerHoldingCids`.
 - If every receiver's `actors` already include the parties the registry requires, or the account holds a recognized standing pre-approval, the factory SHOULD complete in one step and return `ConditionalLockResult_Locked`.
 - Otherwise the factory MUST return `ConditionalLockResult_Pending` with a `ConditionalLockInstruction`, whose `pendingApprovals` names accounts still owed approval and whose `availableActions` reports who may give it. Input holdings SHOULD be locked to the parties the registry requires for `terms.authorizer` and the named parties while pending, with `expiresAt` set to `terms.expiresAt`.
 
@@ -627,7 +633,7 @@ A leg's two sides MUST share an identifier and distinct legs, including across e
 
 `TransferLegSide.meta` MUST contain every key of `Leg.meta`. `Leg.meta` MUST NOT set `splice.lfdecentralizedtrust.org/tx-kind`, `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`, or any other reserved key under `splice.lfdecentralizedtrust.org/conditional-lock/`, and registries MUST reject such terms at creation and amendment. `splice.lfdecentralizedtrust.org/reason` on a leg is not reserved and labels the leg for wallets.
 
-Choice-result and holding `meta` MUST carry `splice.lfdecentralizedtrust.org/tx-kind`: `lock` for creation, approval, and amendment; `transfer` for enactments creating receiver holdings; `unlock` for unlocks, cancellation, and expiry. Enactment results MUST carry `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`. `splice.lfdecentralizedtrust.org/reason` SHOULD be set on reject, withdraw, cancel, expire, and amend.
+Choice-result and holding `meta` MUST carry `splice.lfdecentralizedtrust.org/tx-kind`: `lock` for creation, approval, and amendment; `transfer` for enactments creating receiver holdings; `unlock` for unlocks, cancellation, and expiry. A holding's `meta` is fixed when the holding is created, so the backing holding of a continuation carries `lock` even when the enactment that created it reports `transfer`. Enactment results MUST carry `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`. `splice.lfdecentralizedtrust.org/reason` SHOULD be set on reject, withdraw, cancel, expire, and amend.
 
 #### 3.8 Registry limits and off-ledger API
 
@@ -646,7 +652,7 @@ Registries MUST serve:
 
 - `POST /registry/conditional-lock/v1/lock-factory`: returns the factory contract id, choice context, and disclosed contracts for `ConditionalLockFactory_Lock`, shaped like the CIP-0056 transfer-factory endpoint;
 - `POST /registry/conditional-lock/v1/{lockInstructionId}/choice-contexts/{accept|reject|withdraw}`: returns the choice context and disclosed contracts for the named choice on a `ConditionalLockInstruction`;
-- `POST /registry/conditional-lock/v1/{lockId}/choice-contexts/{enact|expire|cancel|amend}`: returns the choice context and disclosed contracts for the named choice on a `ConditionalLock`.
+- `POST /registry/conditional-lock/v1/{lockContractId}/choice-contexts/{enact|expire|cancel|amend}`: returns the choice context and disclosed contracts for the named choice on a `ConditionalLock`, addressed by its contract id rather than by `ConditionalLockView.lockId`.
 
 The OpenAPI file `conditional-lock-v1.yaml` is part of the reference implementation.
 
@@ -721,7 +727,7 @@ The CIP is additive. No existing package, interface, choice, or off-ledger endpo
 
 ## Reference Implementation
 
-An Apache-2.0 reference implementation is at https://github.com/tankcdr/conditional-holding-lock: the `splice-api-token-conditional-lock-v1` package, an implementation over the published `TestTokenV2` package, the registry OpenAPI file, and Daml Script proofs of the interface's properties, including byte-domain hash vectors shared with EVM and Solana reference programs. It can be taken as a dependency by any registry or application. It currently implements the previous revision of this interface and is being updated to this one. Adding the package to the Splice `token-standard` directory, extending `TestTokenV2` in the Splice tree, wallet support, and a Canton Coin implementation follow when the maintainers schedule them and are required before this CIP can move to Final.
+An Apache-2.0 reference implementation of this revision is at https://github.com/tankcdr/conditional-holding-lock: the `splice-api-token-conditional-lock-v1` package as specified here, an implementation of it over the published `TestTokenV2` package, the registry OpenAPI file `conditional-lock-v1.yaml`, and Daml Script proofs of the interface's properties, including byte-domain hash vectors shared with EVM and Solana reference programs. It can be taken as a dependency by any registry or application. Adding the package to the Splice `token-standard` directory, extending `TestTokenV2` in the Splice tree, wallet support, and a Canton Coin implementation follow when the maintainers schedule them and are required before this CIP can move to Final.
 
 ## Security Considerations
 
@@ -740,6 +746,8 @@ An Apache-2.0 reference implementation is at https://github.com/tankcdr/conditio
 ## Changelog
 
 2026-09-10 - Initial draft.
+
+2026-09-18 - Review round two, resolving the review comments on the previous revision of `ConditionalLockV1.daml` in canton-network/splice#7294, cited by their line in that revision: flattened `Guard` into a leaf type with `Alternative.allOf` and `Rule.anyOf` (line 47), renamed `owner` to `authorizer` (line 91), removed the fallback outcome so `Expire` returns the remainder to the authorizer (line 102), merged the release outcomes into `Outcome_Release` with `fixedLegs` and enactor-supplied legs bounded by `receivers` (line 250), added `Leg.legId` and `Leg.meta` (line 61), generalized acceptance to an approver `Account` with `pendingApprovals` and `availableActions` (line 194), reworded guard evaluation as a check by the lock's signatories (line 23), fixed `Amend` semantics, specified the eight `*ExtraObservers` functions, added `lockId`, `enactedRuleIds`, and `holdingCids`, and added `authorizerHoldingCids` to `ConditionalLockResult_Failed`.
 
 ## Copyright
 

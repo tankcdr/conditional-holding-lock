@@ -1,0 +1,300 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestLegIdentity where
+
+import DA.Assert
+import DA.Foldable (forA_)
+import DA.List (head)
+import DA.TextMap qualified as TextMap
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.TransferEventsV2 qualified as Events
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import ConditionalLock.Policy (metadata, noSlash, prefix)
+import ConditionalLock.TestToken qualified as Impl
+import TestConditionalLock
+  ( setup, account, termsFor, mint, factory, lock, extra
+  , alt, asLocked, enactArg, holdingsChanges, failsBecause )
+
+-- Ticket #6: leg ids MUST be distinct within one enactment.
+test_legIdsMustBeDistinctWithinAnEnactment : Script ()
+test_legIdsMustBeDistinctWithinAnEnactment = do
+  e <- setup ()
+  let releaseRule legs = CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) (CL.Outcome_Release legs [])
+  let dupLegs = [CL.Leg "x" (account e.bob) 50.0 emptyMetadata, CL.Leg "x" (account e.charlie) 50.0 emptyMetadata]
+  let distinctLegs = [CL.Leg "x1" (account e.bob) 50.0 emptyMetadata, CL.Leg "x2" (account e.charlie) 50.0 emptyMetadata]
+
+  -- (i) Duplicate leg IDs in fixedLegs are rejected at ConditionalLockFactory_Lock.
+  let dupTerms = (termsFor e) with rules = [releaseRule dupLegs]
+  dupInput <- mint dupTerms dupTerms.amount
+  dupFactory <- factory e.rulesA dupTerms "dup-fixed-legs"
+  submitMustFail (actAs [e.alice, e.bob, e.charlie] <> readAs [e.adminA]) $ exerciseCmd dupFactory $
+    CL.ConditionalLockFactory_Lock dupTerms [dupInput] [e.alice, e.bob, e.charlie] extra
+  -- Positive control: the same terms with distinct leg IDs are accepted.
+  let distinctTerms = (termsFor e) with rules = [releaseRule distinctLegs]
+  _ <- lock e.rulesA distinctTerms [e.alice, e.bob, e.charlie] >>= asLocked
+
+  -- (ii) The same duplicate leg IDs are rejected at ConditionalLock_Amend, with the
+  -- full valid actor set, before expiry, funded, and the amount not reduced, so the
+  -- duplicate id is the only defect.
+  (cid, _) <- lock e.rulesA (termsFor e) [e.alice, e.bob] >>= asLocked
+  let amendActors = [e.alice, e.bob, e.arbiter, e.charlie]
+  let dupAmend = (termsFor e) with rules = [releaseRule dupLegs]
+  submitMustFail (actAs amendActors) $ exerciseCmd cid $
+    CL.ConditionalLock_Amend dupAmend [] amendActors extra
+  -- Positive control: the same amendment with distinct leg IDs succeeds.
+  let distinctAmend = (termsFor e) with rules = [releaseRule distinctLegs]
+  amended <- submit (actAs amendActors) $ exerciseCmd cid $
+    CL.ConditionalLock_Amend distinctAmend [] amendActors extra
+  (_, _) <- asLocked amended
+
+  -- (iii) On a live lock, an enactor-supplied leg colliding with a fixed leg's ID is
+  -- rejected across fixedLegs and the supplied legs, and two enactor-supplied legs
+  -- sharing one ID collide with each other. Charlie has already approved, so
+  -- account authority is present, and the totals stay within the remaining amount,
+  -- so the id collision is the only defect.
+  let liveTerms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [CL.Leg "pay" (account e.bob) 40.0 emptyMetadata] [account e.charlie])]
+  (liveCid, _) <- lock e.rulesA liveTerms [e.alice, e.bob, e.charlie] >>= asLocked
+  submitMustFail e.arbiter $ exerciseCmd liveCid $
+    (enactArg "release" [e.arbiter]) with legs = [CL.Leg "pay" (account e.charlie) 30.0 emptyMetadata]
+  -- Every other check passes here too: charlie is an approved receiver, the guard
+  -- is satisfied by the arbiter, and 40 + 10 + 20 stays within the remaining 100;
+  -- only the shared "extra" id makes this fail.
+  submitMustFail e.arbiter $ exerciseCmd liveCid $
+    (enactArg "release" [e.arbiter]) with
+      legs = [CL.Leg "extra" (account e.charlie) 10.0 emptyMetadata, CL.Leg "extra" (account e.charlie) 20.0 emptyMetadata]
+  -- Positive control: a distinct supplied leg id is accepted.
+  result3 <- submit e.arbiter $ exerciseCmd liveCid $
+    (enactArg "release" [e.arbiter]) with legs = [CL.Leg "extra" (account e.charlie) 30.0 emptyMetadata]
+  case result3.output of
+    CL.ConditionalLockResult_Enacted [_, _] [] (Some _) -> pure ()
+    _ -> abort "expected the distinct supplied leg to be accepted"
+
+-- Ticket #6: a rule id, a fixed leg id, and a supplied leg id MUST each be non-empty and free of `/`, being components of a composed transfer leg id (CIP section 3.7).
+test_legAndRuleIdsMustBeNonEmptyAndFreeOfSlashes : Script ()
+test_legAndRuleIdsMustBeNonEmptyAndFreeOfSlashes = do
+  e <- setup ()
+  let r = head (termsFor e).rules
+
+  -- A rule id containing `/` is rejected at creation.
+  let slashRuleTerms = (termsFor e) with rules = [r with id = "rel/ease"]
+  slashRuleInput <- mint slashRuleTerms slashRuleTerms.amount
+  slashRuleFactory <- factory e.rulesA slashRuleTerms "slash-rule-id"
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA])
+    "rule IDs must be unique, non-empty, and free of /" $ exerciseCmd slashRuleFactory $
+    CL.ConditionalLockFactory_Lock slashRuleTerms [slashRuleInput] [e.alice, e.bob] extra
+  -- An empty rule id is rejected at creation too.
+  let emptyRuleTerms = (termsFor e) with rules = [r with id = ""]
+  emptyRuleInput <- mint emptyRuleTerms emptyRuleTerms.amount
+  emptyRuleFactory <- factory e.rulesA emptyRuleTerms "empty-rule-id"
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA])
+    "rule IDs must be unique, non-empty, and free of /" $ exerciseCmd emptyRuleFactory $
+    CL.ConditionalLockFactory_Lock emptyRuleTerms [emptyRuleInput] [e.alice, e.bob] extra
+  -- Positive control: the same id, non-empty and without the slash, is accepted.
+  _ <- lock e.rulesA (termsFor e) [e.alice, e.bob] >>= asLocked
+
+  -- A fixed leg's legId containing `/` is rejected at creation.
+  let slashLegOutcome = CL.Outcome_Release [CL.Leg "pay/out" (account e.bob) 100.0 emptyMetadata] []
+  let slashLegTerms = (termsFor e) with rules = [r with outcome = slashLegOutcome]
+  slashLegInput <- mint slashLegTerms slashLegTerms.amount
+  slashLegFactory <- factory e.rulesA slashLegTerms "slash-leg-id"
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA]) "invalid rule outcome" $ exerciseCmd slashLegFactory $
+    CL.ConditionalLockFactory_Lock slashLegTerms [slashLegInput] [e.alice, e.bob] extra
+  -- An empty fixed leg id is rejected at creation too.
+  let emptyLegOutcome = CL.Outcome_Release [CL.Leg "" (account e.bob) 100.0 emptyMetadata] []
+  let emptyLegTerms = (termsFor e) with rules = [r with outcome = emptyLegOutcome]
+  emptyLegInput <- mint emptyLegTerms emptyLegTerms.amount
+  emptyLegFactory <- factory e.rulesA emptyLegTerms "empty-leg-id"
+  failsBecause (actAs [e.alice, e.bob] <> readAs [e.adminA]) "invalid rule outcome" $ exerciseCmd emptyLegFactory $
+    CL.ConditionalLockFactory_Lock emptyLegTerms [emptyLegInput] [e.alice, e.bob] extra
+  -- Positive control: the same leg, non-empty and without the slash, is accepted.
+  _ <- lock e.rulesA (termsFor e) [e.alice, e.bob] >>= asLocked
+
+  -- An enactor-supplied legId containing `/` is rejected at ConditionalLock_Enact.
+  let escrowTerms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) (CL.Outcome_Release [] [account e.bob])]
+  (cid, _) <- lock e.rulesA escrowTerms [e.alice, e.bob] >>= asLocked
+  failsBecause (actAs e.arbiter) "legs must be well formed, within max-legs, and have unique IDs" $ exerciseCmd cid $
+    (enactArg "award" [e.arbiter]) with legs = [CL.Leg "pay/out" (account e.bob) 100.0 emptyMetadata]
+  -- An empty enactor-supplied legId is rejected at ConditionalLock_Enact too.
+  failsBecause (actAs e.arbiter) "legs must be well formed, within max-legs, and have unique IDs" $ exerciseCmd cid $
+    (enactArg "award" [e.arbiter]) with legs = [CL.Leg "" (account e.bob) 100.0 emptyMetadata]
+  -- Positive control: the same supplied leg, non-empty and without the slash, is accepted.
+  result <- submit e.arbiter $ exerciseCmd cid $
+    (enactArg "award" [e.arbiter]) with legs = [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [_] [] None -> pure ()
+    _ -> abort "expected the slash-free, non-empty supplied leg to be accepted"
+
+  -- CIP section 3.7 identifies a transfer leg as `<lockId>/<ruleId>/<legId>`. Without
+  -- the no-slash MUST on each component, "a/1" and "b" would compose to the same
+  -- string as "a" and "1/b" do: the ambiguity noSlash avoids. Without the non-empty
+  -- MUST, an empty component would compose invisibly into a neighbour's separator.
+  noSlash "a/1" === False
+  noSlash "1/b" === False
+  noSlash "a1" === True
+  noSlash "" === False
+
+-- Ticket #6: a leg's own metadata reaches both TransferLegSides of that leg
+-- without displacing the keys the registry sets itself.
+test_legMetadataReachesBothTransferLegSides : Script ()
+test_legMetadataReachesBothTransferLegSides = do
+  e <- setup ()
+  let annotatedLeg = CL.Leg "annotated" (account e.bob) 60.0 (metadata [(prefix <> "reason", "arbiter fee")])
+  let plainLeg = CL.Leg "plain" (account e.bob) 40.0 emptyMetadata
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [annotatedLeg, plainLeg] [])]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  tree <- submitTree e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  case holdingsChanges tree.rootEvents of
+    [sent, received] -> case (sent.transferLegSides, received.transferLegSides) of
+      ([annotatedOut, plainOut], [annotatedIn, plainIn]) -> do
+        -- The leg's own value wins on both sides: `.../reason` is deliberately not
+        -- reserved, and the merge is leg-biased (leg meta unioned over registry meta).
+        Some "arbiter fee" === lookupMeta (prefix <> "reason") annotatedOut
+        Some "arbiter fee" === lookupMeta (prefix <> "reason") annotatedIn
+        -- The unannotated leg falls back to the registry's own value: the rule id.
+        Some "release" === lookupMeta (prefix <> "reason") plainOut
+        Some "release" === lookupMeta (prefix <> "reason") plainIn
+        -- Reserved keys are always the registry's, on every side of every leg.
+        forA_ [annotatedOut, annotatedIn, plainOut, plainIn] $ \side -> do
+          Some "transfer" === lookupMeta (prefix <> "tx-kind") side
+          Some "release" === lookupMeta (prefix <> "conditional-lock/rule-id") side
+      _ -> abort "expected two distinct transfer legs on each side"
+    _ -> abort "expected one sender event and one receiver event"
+
+-- Ticket #6: a leg MUST NOT set any key the registry is required to set, whether
+-- the leg is fixed by the terms, supplied by the enactor, or reached via an
+-- amendment.
+test_legMetadataCannotOverrideRegistryKeys : Script ()
+test_legMetadataCannotOverrideRegistryKeys = do
+  e <- setup ()
+  let r = head (termsFor e).rules
+  let plainLeg = CL.Leg "payout" (account e.bob) 100.0 emptyMetadata
+  let lockAttempt label terms = do
+        input <- mint terms terms.amount
+        f <- factory e.rulesA terms label
+        submitMustFail (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd f $
+          CL.ConditionalLockFactory_Lock terms [input] [e.alice, e.bob] extra
+
+  -- (i) A fixed leg cannot set the registry's tx-kind key.
+  let txKindLeg = CL.Leg "payout" (account e.bob) 100.0 (metadata [(prefix <> "tx-kind", "transfer")])
+  lockAttempt "reserved-tx-kind" ((termsFor e) with rules = [r with outcome = CL.Outcome_Release [txKindLeg] []])
+  -- Positive control: the same leg without any reserved key is accepted.
+  _ <- lock e.rulesA ((termsFor e) with rules = [r with outcome = CL.Outcome_Release [plainLeg] []]) [e.alice, e.bob] >>= asLocked
+
+  -- (ii) A fixed leg cannot set the registry's rule-id key.
+  let ruleIdLeg = CL.Leg "payout" (account e.bob) 100.0 (metadata [(prefix <> "conditional-lock/rule-id", "forged")])
+  lockAttempt "reserved-rule-id" ((termsFor e) with rules = [r with outcome = CL.Outcome_Release [ruleIdLeg] []])
+  -- Positive control: the same leg without any reserved key is accepted.
+  _ <- lock e.rulesA ((termsFor e) with rules = [r with outcome = CL.Outcome_Release [plainLeg] []]) [e.alice, e.bob] >>= asLocked
+
+  -- (iii) The whole conditional-lock/ namespace is reserved, not just the two
+  -- named keys.
+  let maxRulesLeg = CL.Leg "payout" (account e.bob) 100.0 (metadata [(prefix <> "conditional-lock/max-rules", "1")])
+  lockAttempt "reserved-namespace" ((termsFor e) with rules = [r with outcome = CL.Outcome_Release [maxRulesLeg] []])
+  -- Positive control: the same leg without any reserved key is accepted.
+  _ <- lock e.rulesA ((termsFor e) with rules = [r with outcome = CL.Outcome_Release [plainLeg] []]) [e.alice, e.bob] >>= asLocked
+
+  -- (iv) An enactor-supplied leg cannot set the registry's tx-kind key either.
+  let escrowTerms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) (CL.Outcome_Release [] [account e.bob])]
+  (cid, _) <- lock e.rulesA escrowTerms [e.alice, e.bob] >>= asLocked
+  submitMustFail e.arbiter $ exerciseCmd cid $ (enactArg "award" [e.arbiter]) with
+    legs = [CL.Leg "supplied" (account e.bob) 100.0 (metadata [(prefix <> "tx-kind", "transfer")])]
+  -- Positive control: the same supplied leg MAY set the non-reserved reason key.
+  result <- submit e.arbiter $ exerciseCmd cid $ (enactArg "award" [e.arbiter]) with
+    legs = [CL.Leg "supplied" (account e.bob) 100.0 (metadata [(prefix <> "reason", "bonus")])]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [_] [] None -> pure ()
+    _ -> abort "expected non-reserved supplied leg metadata to succeed"
+
+  -- (v) ConditionalLock_Amend rejects a reserved key wherever newTerms carries it,
+  -- whether on a Leg.meta or on newTerms.meta itself, with the full valid actor set
+  -- and everything else about the amendment valid.
+  (liveCid, _) <- lock e.rulesA (termsFor e) [e.alice, e.bob] >>= asLocked
+  let amendActors = [e.alice, e.bob, e.arbiter]
+  let cleanAmend = termsFor e
+  let legReservedAmend = cleanAmend with rules = [r with outcome = CL.Outcome_Release [txKindLeg] []]
+  submitMustFail (actAs amendActors) $ exerciseCmd liveCid $
+    CL.ConditionalLock_Amend legReservedAmend [] amendActors extra
+  let termsReservedAmend = cleanAmend with meta = metadata [(prefix <> "conditional-lock/rule-id", "forged")]
+  submitMustFail (actAs amendActors) $ exerciseCmd liveCid $
+    CL.ConditionalLock_Amend termsReservedAmend [] amendActors extra
+  -- Positive control: the same amendment with clean metadata succeeds.
+  amended <- submit (actAs amendActors) $ exerciseCmd liveCid $
+    CL.ConditionalLock_Amend cleanAmend [] amendActors extra
+  (_, _) <- asLocked amended
+  pure ()
+
+-- Ticket #6 (adapted): `<lockId>/<ruleId>/<legId>` stays distinct when two rules of one lock reuse a legId, and when two different locks share both a rule id and a leg id.
+test_sameLegIdAcrossDifferentEnactmentsDoesNotCollide : Script ()
+test_sameLegIdAcrossDifferentEnactmentsDoesNotCollide = do
+  e <- setup ()
+  let tranche id amount = CL.Rule id [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+        (CL.Outcome_Release [CL.Leg "payout" (account e.bob) amount emptyMetadata] [])
+  let terms = (termsFor e) with rules = [tranche "first" 30.0, tranche "second" 70.0]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  firstTree <- submitTree e.arbiter $ exerciseCmd cid $ enactArg "first" [e.arbiter]
+  case holdingsChanges firstTree.rootEvents of
+    [firstSent, _] -> case firstSent.transferLegSides of
+      [firstLeg] -> firstLeg.transferLegId === "proof-lock/first/payout"
+      _ -> abort "expected a single transfer leg for the first tranche"
+    _ -> abort "expected sender and receiver events for the first tranche"
+  [(nextCid, _)] <- query @Impl.ActiveLock e.alice
+  secondTree <- submitTree e.arbiter $
+    exerciseCmd (toInterfaceContractId nextCid : ContractId CL.ConditionalLock) $ enactArg "second" [e.arbiter]
+  case holdingsChanges secondTree.rootEvents of
+    [secondSent, _] -> case secondSent.transferLegSides of
+      [secondLeg] -> do
+        secondLeg.transferLegId === "proof-lock/second/payout"
+        assert (secondLeg.transferLegId /= "proof-lock/first/payout")
+      _ -> abort "expected a single transfer leg for the second tranche"
+    _ -> abort "expected sender and receiver events for the second tranche"
+
+  -- Two DIFFERENT locks, not two rules of one lock: the `lock` helper hardcodes
+  -- "proof-lock", so both locks are built directly through `mint` and `factory`
+  -- with distinct lock ids, sharing both a rule id and a leg id with each other.
+  let sharedRule = CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+        (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])
+  let termsOne = (termsFor e) with rules = [sharedRule]
+  let termsTwo = termsOne
+  inputOne <- mint termsOne termsOne.amount
+  factoryOne <- factory e.rulesA termsOne "lock-one"
+  resultOne <- submit (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd factoryOne $
+    CL.ConditionalLockFactory_Lock termsOne [inputOne] [e.alice, e.bob] extra
+  (cidOne, _) <- asLocked resultOne
+  inputTwo <- mint termsTwo termsTwo.amount
+  factoryTwo <- factory e.rulesA termsTwo "lock-two"
+  resultTwo <- submit (actAs [e.alice, e.bob] <> readAs [e.adminA]) $ exerciseCmd factoryTwo $
+    CL.ConditionalLockFactory_Lock termsTwo [inputTwo] [e.alice, e.bob] extra
+  (cidTwo, _) <- asLocked resultTwo
+  treeOne <- submitTree e.arbiter $ exerciseCmd cidOne $ enactArg "release" [e.arbiter]
+  treeTwo <- submitTree e.arbiter $ exerciseCmd cidTwo $ enactArg "release" [e.arbiter]
+  case (holdingsChanges treeOne.rootEvents, holdingsChanges treeTwo.rootEvents) of
+    ([sentOne, _], [sentTwo, _]) -> case (sentOne.transferLegSides, sentTwo.transferLegSides) of
+      ([legOne], [legTwo]) -> do
+        legOne.transferLegId === "lock-one/release/payout"
+        legTwo.transferLegId === "lock-two/release/payout"
+        assert (legOne.transferLegId /= legTwo.transferLegId)
+      _ -> abort "expected a single transfer leg for each lock"
+    _ -> abort "expected sender and receiver events for each lock"
+
+-- CIP section 3.7: a lock id MUST be non-empty and free of `/`, being a component of a composed transfer leg id.
+test_factoryRejectsAMalformedLockId : Script ()
+test_factoryRejectsAMalformedLockId = do
+  e <- setup ()
+  -- The admin is Factory's sole signatory, so `ensure noSlash lockId` is the only
+  -- thing that can reject this create: a template precondition with no assertMsg
+  -- text to pin, so this stays a plain submitMustFail.
+  submitMustFail e.adminA $ createCmd (Impl.Factory e.adminA e.rulesA "a/b")
+  submitMustFail e.adminA $ createCmd (Impl.Factory e.adminA e.rulesA "")
+  -- Positive control: a well-formed lock id is accepted.
+  _ <- submit e.adminA $ createCmd (Impl.Factory e.adminA e.rulesA "well-formed")
+  pure ()
+
+lookupMeta : Text -> Events.TransferLegSide -> Optional Text
+lookupMeta key side = TextMap.lookup key side.meta.values

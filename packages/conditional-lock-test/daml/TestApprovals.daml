@@ -1,0 +1,158 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestApprovals where
+
+import DA.Assert
+import DA.List (dedup, head, sort)
+import DA.Optional (fromSome)
+import DA.Map qualified as Map
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import ConditionalLock.Policy
+import ConditionalLock.TestToken qualified as Impl
+import TestConditionalLock
+
+-- Ticket #7: availableActions reports one joint conjunction group per pending
+-- account, not a single party, and the group is directly usable as actors.
+test_availableActionsReportsAcceptGroups : Script ()
+test_availableActionsReportsAcceptGroups = do
+  e <- setup ()
+  let charlieAccount = (account e.charlie) with provider = Some e.provider
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release
+            [ CL.Leg "bob-leg" (account e.bob) 60.0 emptyMetadata
+            , CL.Leg "charlie-leg" charlieAccount 40.0 emptyMetadata ] [])]
+  instruction <- lock e.rulesA terms [e.alice] >>= asPending
+  Some view <- queryInterfaceContractId e.alice instruction
+  view.lockId === "proof-lock"
+  view.pendingApprovals === [account e.bob, charlieAccount]
+  Map.lookup CL.CLIA_Accept view.availableActions === Some [[e.bob], [e.charlie, e.provider]]
+  Map.lookup CL.CLIA_Reject view.availableActions === Some [[e.bob], [e.charlie, e.provider]]
+  Map.lookup CL.CLIA_Withdraw view.availableActions === Some [[e.alice]]
+  -- Take the reported charlie group directly out of availableActions, so the
+  -- exercise below is driven by the report and not by a separately hardcoded group.
+  let acceptGroups = fromSome (Map.lookup CL.CLIA_Accept view.availableActions)
+  let charlieGroup = head (filter (elem e.charlie) acceptGroups)
+  -- Full ledger authority for both charlie and the provider; the only defect
+  -- is that the choice's own actors argument omits the provider. Pinning the
+  -- registry's own message is what makes this test detect removal of that
+  -- check: with full ledger authority present, a missing-authorization error
+  -- would otherwise substitute and the submission would still fail.
+  failsBecause (actAs [e.charlie, e.provider]) "approver account must authorize acceptance" $ exerciseCmd instruction $
+    CL.ConditionalLockInstruction_Accept charlieAccount [e.charlie] extra
+  accepted <- submit (actAs charlieGroup) $ exerciseCmd instruction $
+    CL.ConditionalLockInstruction_Accept charlieAccount charlieGroup extra
+  _ <- asPending accepted
+  pure ()
+
+-- Ticket #7: availableActions and pendingApprovals shrink as approvals are
+-- given, and no instruction remains once every approval has been given.
+test_availableActionsShrinksOnApproval : Script ()
+test_availableActionsShrinksOnApproval = do
+  e <- setup ()
+  let charlieAccount = (account e.charlie) with provider = Some e.provider
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release
+            [ CL.Leg "bob-leg" (account e.bob) 60.0 emptyMetadata
+            , CL.Leg "charlie-leg" charlieAccount 40.0 emptyMetadata ] [])]
+  initial <- lock e.rulesA terms [e.alice] >>= asPending
+  afterBob <- submit e.bob (exerciseCmd initial (CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra))
+    >>= asPending
+  Some view <- queryInterfaceContractId e.charlie afterBob
+  view.pendingApprovals === [charlieAccount]
+  Map.lookup CL.CLIA_Accept view.availableActions === Some [[e.charlie, e.provider]]
+  Map.lookup CL.CLIA_Reject view.availableActions === Some [[e.charlie, e.provider]]
+  result <- submit (actAs [e.charlie, e.provider]) $ exerciseCmd afterBob $
+    CL.ConditionalLockInstruction_Accept charlieAccount [e.charlie, e.provider] extra
+  _ <- asLocked result
+  query @Impl.Instruction e.alice >>= (=== [])
+
+-- Ticket #7, CIP-TBD section 3.3/3.5: availableActions on an active lock
+-- reports one CLA_Enact entry per rule, one group per entitled enactor as a
+-- disjunction, and entitlement rather than current guard satisfaction.
+test_lockAvailableActionsPerRule : Script ()
+test_lockAvailableActionsPerRule = do
+  e <- setup ()
+  let solo = CL.Rule "solo" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock
+  let joint = CL.Rule "joint" [e.arbiter, e.charlie] (alt (CL.Guard_Parties [e.arbiter, e.charlie] 1)) CL.Outcome_Unlock
+  let future = CL.Rule "future" [e.arbiter] (alt (CL.Guard_After (e.now `addRelTime` days 2))) CL.Outcome_Unlock
+  let terms = (termsFor e) with rules = [solo, joint, future]
+  (cid, _) <- lock e.rulesA terms [e.alice] >>= asLocked
+  Some view <- queryInterfaceContractId e.alice cid
+  Map.lookup (CL.CLA_Enact "solo") view.availableActions === Some [[e.arbiter]]
+  Map.lookup (CL.CLA_Enact "joint") view.availableActions === Some [[e.arbiter], [e.charlie]]
+  -- Presence means the rule exists and these groups are entitled to enact it,
+  -- not that any alternative is currently satisfied (CIP section 3.5); the
+  -- "future" rule's guard is not yet satisfiable and still gets an entry.
+  Map.lookup (CL.CLA_Enact "future") view.availableActions === Some [[e.arbiter]]
+  Map.lookup (CL.CLA_Enact "no-such-rule") view.availableActions === None
+  let enactKeys = [ k | k@(CL.CLA_Enact _) <- Map.keys view.availableActions ]
+  length enactKeys === length view.terms.rules
+  Map.lookup CL.CLA_Expire view.availableActions === Some [accountParties terms.authorizer]
+  let consentGroup = dedup (accountParties terms.authorizer <> namedParties terms)
+  Map.lookup CL.CLA_Cancel view.availableActions === Some [consentGroup]
+  Map.lookup CL.CLA_Amend view.availableActions === Some [consentGroup]
+  -- Entitlement is not satisfaction: enacting "future" now fails on its guard.
+  submitMustFail e.arbiter $ exerciseCmd cid $ enactArg "future" [e.arbiter]
+  -- Positive control differing only in guard satisfaction: "solo" uses the
+  -- same actor and the same entitlement path and succeeds immediately.
+  result <- submit e.arbiter $ exerciseCmd cid $ enactArg "solo" [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.authorizer terms.instrumentId 100.0
+    _ -> abort "expected authorizer-directed unlock"
+
+-- Ticket #7, CIP-TBD section 9.1: a sending-side custodian, i.e. a provider
+-- on the authorizer account, MUST also authorize ConditionalLockFactory_Lock.
+test_authorizerProviderMustApproveLockCreation : Script ()
+test_authorizerProviderMustApproveLockCreation = do
+  e <- setup ()
+  let terms = (termsFor e) with authorizer = (account e.alice) with provider = Some e.provider
+  authorized (accountParties terms.authorizer) [e.alice] === False
+  authorized (accountParties terms.authorizer) [e.alice, e.provider] === True
+  input <- mint terms terms.amount
+  f <- factory e.rulesA terms "proof-lock-provider"
+  -- actAs carries both alice's and the provider's ledger authority, and readAs
+  -- admin makes the factory visible; the only defect is that the choice's own
+  -- actors argument omits the provider. Pinning the registry's own message is
+  -- what makes this test detect removal of that check: with full ledger
+  -- authority present, a missing-authorization error would otherwise
+  -- substitute and the submission would still fail.
+  failsBecause (actAs [e.alice, e.provider] <> readAs [e.adminA]) "authorizer account must authorize funding" $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock terms [input] [e.alice] extra
+  -- Positive control differing only in the actors argument.
+  result <- submit (actAs [e.alice, e.provider] <> readAs [e.adminA]) $ exerciseCmd f $
+    CL.ConditionalLockFactory_Lock terms [input] [e.alice, e.provider] extra
+  instruction <- asPending result
+  accepted <- submit e.bob $ exerciseCmd instruction $
+    CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+  (cid, _) <- asLocked accepted
+  enacted <- submit e.arbiter $ exerciseCmd cid $ enactArg "release" [e.arbiter]
+  case enacted.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected provider-authorized lock to release to bob"
+
+-- CIP section 3.3: the lock's signatories are the registry admin, the
+-- authorizer account, and every approving account, and no one else.
+test_lockSignatoriesAreTheAdminAuthorizerAndApprovers : Script ()
+test_lockSignatoriesAreTheAdminAuthorizerAndApprovers = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  -- Bob is the only receiver and approves at lock time, so this is a one-step lock.
+  _ <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  [(_, activeLock)] <- query @Impl.ActiveLock e.alice
+  let state = activeLock.state
+  let expectedSignatories = sort $ dedup $
+        [terms.instrumentId.admin] <> accountParties terms.authorizer <> accountParties (account e.bob)
+  sort (Impl.stateSignatories state) === expectedSignatories
+  -- The arbiter is named as an enactor, so the guard is checked under this
+  -- signatory set's authority, but it neither approves nor receives, so it is
+  -- not itself a signatory (CIP section 3.3): guards are checked, enactors
+  -- are merely named.
+  assert (e.arbiter `notElem` Impl.stateSignatories state)
+  assert (e.arbiter `elem` namedParties terms)

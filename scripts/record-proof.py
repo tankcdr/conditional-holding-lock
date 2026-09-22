@@ -16,12 +16,12 @@ version = json.loads((run / "ledger-version.json").read_text())["version"]
 results = json.loads((run / "results.json").read_text())
 required = {
     "TestHashVectors:test_hashVectorsMatchEvm",
-    "TestConditionalLock:test_receiverAuthorityPersistsAndOwnerDoesNotEnact",
-    "TestConditionalLock:test_oneStepBothActorsAndOwnerChange",
+    "TestConditionalLock:test_approverAuthorityPersistsAndAuthorizerDoesNotEnact",
+    "TestConditionalLock:test_oneStepBothActorsAndAuthorizerChange",
     "TestConditionalLock:test_atomicDvpAcrossTwoTestTokenV2Registries",
     "TestConditionalLock:test_atomicDvpRollsBackFirstEnactWhenSecondFails",
     "TestWorkedExamples:test_example_htlcLeg",
-    "TestWorkedExamples:test_example_executorFreeDvp",
+    "TestWorkedExamples:test_example_dvpBetweenRegistries",
     "TestWorkedExamples:test_example_arbiterEscrow",
     "TestWorkedExamples:test_example_vesting",
     "TestWorkedExamples:test_example_collateral",
