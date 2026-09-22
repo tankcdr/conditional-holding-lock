@@ -1,6 +1,6 @@
 # Conditional Holding Lock: validation and runtime compatibility
 
-Evaluation date: **September 18, 2026**. This report covers the reference interface and registry adapter: worked-example lifecycles, approver authority, atomic settlement, event reporting, byte-domain hashing, and compatibility with the pinned Canton runtimes.
+Evaluation date: **September 22, 2026**. This report covers the reference interface and registry adapter: worked-example lifecycles, approver authority, atomic settlement, event reporting, byte-domain hashing, and compatibility with the pinned Canton runtimes.
 
 ## Environment and compatibility
 

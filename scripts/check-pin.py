@@ -46,9 +46,15 @@ def main():
     obj = ref_obj["object"]
     sha = obj["sha"]
     if obj.get("type") == "tag":
-        sha = subprocess.check_output(
-            ["gh", "api", f"repos/{pin['repository']}/git/tags/{sha}", "--jq", ".object.sha"]
-        ).decode().strip()
+        try:
+            sha = subprocess.check_output(
+                ["gh", "api", f"repos/{pin['repository']}/git/tags/{sha}", "--jq", ".object.sha"],
+                stderr=subprocess.PIPE,
+            ).decode().strip()
+        except CalledProcessError as exc:
+            raise SystemExit(
+                f"could not dereference annotated tag {ref} in {pin['repository']}: {exc.stderr.decode().strip()}"
+            )
 
     if sha != pin["splice_release_commit"]:
         raise SystemExit(

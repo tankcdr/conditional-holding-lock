@@ -91,7 +91,7 @@ Splice source and downloaded DARs are never committed here. A future Splice impl
 
 ## Releases
 
-Releases are cut from a `v<version>` git tag, starting at `v0.1.0`; the Daml packages keep `version: 1.0.0` in `daml.yaml`. The three consumer DARs are attached to the GitHub Release, and the generated `conditional-lock-release.json` manifest is attached alongside them. Release mechanics live in two files and nowhere else: [CHANGELOG.md](CHANGELOG.md) for the per-release history, the versioning rule, and package identity, and [docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the release body. `just release-dry-run <version>` runs every release check except the clean-worktree check, and never tags.
+Releases are cut from a `v<version>` git tag, starting at `v0.1.0`; the Daml packages keep `version: 1.0.0` in `daml.yaml`. The three consumer DARs are attached to the GitHub Release, and the generated `conditional-lock-release.json` manifest is attached alongside them. Release mechanics live in two files and nowhere else: [CHANGELOG.md](CHANGELOG.md) for the per-release history, the versioning rule, and package identity, and [docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the release body. `just release-dry-run <version>` runs every release check except the clean-worktree and tag-exists guards, and never tags.
 
 ## Reference scope
 

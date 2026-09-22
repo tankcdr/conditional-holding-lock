@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-22T15:16:28.726246+00:00",
+  "checked_at": "2026-09-22T15:28:48.624310+00:00",
   "source_verification": {
     "checked_at": "2026-09-22T15:16:45.335065+00:00",
     "splice_ref": "0.8.1",
@@ -53,8 +53,8 @@
   "ide_ledger": {
     "sdk": "3.5.2",
     "java": "21.0.12.1",
-    "passed": 60,
-    "checked_at": "2026-09-18T23:54:49.281443+00:00",
+    "passed": 70,
+    "checked_at": "2026-09-22T15:28:48.624310+00:00",
     "command": "./scripts/test.sh"
   },
   "evm": {

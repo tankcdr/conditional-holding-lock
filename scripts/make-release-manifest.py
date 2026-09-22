@@ -21,11 +21,33 @@ sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 import dar_identity  # noqa: E402
 
 
+def changelog_section(version):
+    """Return the CHANGELOG.md text under `## [version]`, up to the next `## ` heading."""
+    changelog_path = ROOT / "CHANGELOG.md"
+    if not changelog_path.exists():
+        raise SystemExit(f"CHANGELOG.md does not exist; add a '## [{version}]' heading with the Package identity block before running this.")
+    changelog = changelog_path.read_text()
+    match = re.search(rf"^## \[{re.escape(version)}\]", changelog, re.MULTILINE)
+    if not match:
+        raise SystemExit(f"CHANGELOG.md is missing heading '## [{version}]'")
+    rest = changelog[match.end():]
+    nxt = re.search(r"^## ", rest, re.MULTILINE)
+    return rest[: nxt.start()] if nxt else rest
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
     parser.add_argument("--allow-dirty", action="store_true", help="Skip the clean worktree check for dry runs.")
+    parser.add_argument("--check-changelog-only", action="store_true",
+                        help="Only assert CHANGELOG.md has a section for this version, then exit. "
+                             "Lets the release recipe fail early, before the long test steps.")
     args = parser.parse_args()
+
+    if args.check_changelog_only:
+        changelog_section(args.version)
+        print(f"OK: CHANGELOG.md has a section for {args.version}")
+        return
 
     status = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT).decode()
     dirty = bool(status.strip())
@@ -68,16 +90,7 @@ def main():
         manifest["dry_run"] = True
         manifest["git_dirty"] = dirty
 
-    changelog_path = ROOT / "CHANGELOG.md"
-    if not changelog_path.exists():
-        raise SystemExit(f"CHANGELOG.md does not exist; add a '## [{args.version}]' heading with the Package identity block before running this.")
-    changelog = changelog_path.read_text()
-    heading = re.search(rf"^## \[{re.escape(args.version)}\]", changelog, re.MULTILINE)
-    if not heading:
-        raise SystemExit(f"CHANGELOG.md is missing heading '## [{args.version}]'")
-    rest = changelog[heading.end():]
-    next_heading = re.search(r"^## ", rest, re.MULTILINE)
-    section = rest[:next_heading.start()] if next_heading else rest
+    section = changelog_section(args.version)
     for package in packages:
         if package["package_id"] not in section:
             raise SystemExit(f"CHANGELOG.md is missing package ID {package['package_id']}; regenerate the Package identity block from the built DARs")

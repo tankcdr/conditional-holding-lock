@@ -6,14 +6,16 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 
 "$ROOT/scripts/fetch-dars.sh"
 
-# Build order. The release-identity list lives in scripts/lib/dar_identity.py
-# (PACKAGES); keep the two in step when adding a package.
-packages=(
-  packages/splice-api-token-conditional-lock-v1
-  packages/conditional-lock-utils
-  packages/conditional-lock-test-token
-  packages/conditional-lock-test
-)
+# The package list lives in scripts/lib/dar_identity.py (PACKAGES), which is
+# also what the manifest, the evidence, and the reproducibility check read, so
+# a package can never be built but left out of the release.
+mapfile -t packages < <(python3 -c "
+import sys
+sys.path.insert(0, '$ROOT/scripts/lib')
+import dar_identity
+for pkg, _attached in dar_identity.PACKAGES:
+    print('packages/' + pkg)
+")
 
 for pkg in "${packages[@]}"; do
   echo "==> dpm build $pkg"

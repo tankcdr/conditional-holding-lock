@@ -66,6 +66,7 @@ verify-reproducible:
 release version:
     if git rev-parse -q --verify "refs/tags/v{{version}}" >/dev/null; then echo "Tag v{{version}} already exists" >&2; exit 1; fi
     if [ -n "$(git status --porcelain)" ]; then echo "Worktree is dirty" >&2; exit 1; fi
+    python3 ./scripts/make-release-manifest.py "{{version}}" --check-changelog-only
     just check-pin
     just check-compatibility
     just verify-reproducible
