@@ -21,7 +21,7 @@ The published DAR dependencies come from Splice main commit [`6b82367efb9ca6f94c
 
 ## Executable proofs
 
-**Result: PASS.** All 60 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
+**Result: PASS.** All 70 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.14 and 3.5.15. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
 
 Run from the repository root:
 
