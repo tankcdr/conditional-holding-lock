@@ -150,9 +150,10 @@ limitsMetadata l = metadata $ map (\(k, v) -> (limitKey k, v))
 -- validates terms client-side before submitting (CIP Security Considerations).
 -- `None` when any of the eight keys is absent or unparseable. Inverse of
 -- `limitsMetadata`: `limitsFromMetadata (limitsMetadata l) == Some l` for every
--- `l` whose durations are under `maxAdvertisedMicros`, which is every duration a
--- registry could sanely advertise. Beyond that it fails closed rather than
--- overflowing.
+-- `l` with non-negative integer fields whose durations are under
+-- `maxAdvertisedMicros`, which is every profile a registry could sanely
+-- advertise. Outside that domain it fails closed rather than overflowing or
+-- returning a half-read record.
 limitsFromMetadata : Metadata -> Optional Limits
 limitsFromMetadata meta = do
   rules <- int "max-rules"
@@ -208,7 +209,9 @@ scaleMicros factor n =
 -- | Canonical ISO-8601 duration: a whole number of days as `P<n>D`, otherwise
 -- whole seconds as `PT<n>S`, otherwise fractional seconds to microsecond
 -- precision. A negative duration takes a leading `-` (ISO 8601-2); no advertised
--- limit is negative, but the rendering stays total so the round trip does too.
+-- limit is negative, but the sign is carried so the round trip holds there too.
+-- Not defined at the `Int` minimum, where `abs` has no representable result;
+-- no duration reachable from an advertised limit comes near it.
 renderDuration : RelTime -> Text
 renderDuration d =
   let us = convertRelTimeToMicroseconds d

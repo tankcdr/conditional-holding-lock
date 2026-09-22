@@ -32,6 +32,10 @@ required = {
     "TestPolicyLimits:test_limitsRoundTripThroughMetadata",
     "TestPolicyLimits:test_limitsFromMetadataRejectsMalformed",
     "TestPolicyLimits:test_witnessPreimageBoundIsEnforced",
+    "TestPolicyLimits:test_eachLimitKeyCarriesItsOwnField",
+    "TestPolicyLimits:test_pureValidatorsReadBoundsFromTheirArgument",
+    "TestPolicyLimits:test_legValidatorsReadBoundsFromTheirArgument",
+    "TestPolicyLimits:test_validateTermsReadsBoundsFromItsArgument",
     "TestRegistryLimits:test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected",
 }
 if version != config["canton"] or not required.issubset(results) or any("result" not in r for r in results.values()):

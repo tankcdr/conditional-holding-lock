@@ -14,6 +14,7 @@ import Daml.Script
 import Splice.Api.Token.MetadataV1
 import Splice.Api.Token.ConditionalLockV1 qualified as CL
 import ConditionalLock.Policy
+import TestConditionalLock
 
 -- CIP section 3.8: the reference registry's own choices meet every floor.
 test_cipFloorsAreSatisfied : Script ()
@@ -63,12 +64,49 @@ test_limitsMetadataMatchesAdvertised = do
   advertised.values === expected
   advertised === Metadata expected
 
+-- | A profile whose eight values are all distinct. `referenceLimits` sets six
+-- fields to the same 8, so it cannot tell a correct rendering from one that
+-- transposes two keys; this one can.
+distinctLimits : Limits
+distinctLimits = Limits with
+  maxRules = 9
+  maxLegs = 10
+  maxAlternativesPerRule = 11
+  maxGuardsPerAlternative = 12
+  maxPreimages = 13
+  maxNamedParties = 14
+  minDuration = seconds 2
+  maxDuration = days 31
+
+-- Each key must carry its own field's value. With every value distinct, binding
+-- a key to the wrong field -- in `limitsMetadata` or in `limitsFromMetadata` --
+-- fails here, which a uniform profile of 8s could never detect.
+test_eachLimitKeyCarriesItsOwnField : Script ()
+test_eachLimitKeyCarriesItsOwnField = do
+  let m = (limitsMetadata distinctLimits).values
+  let at key = TextMap.lookup (limitKey key) m
+  TextMap.size m === 8
+  at "max-rules" === Some "9"
+  at "max-legs" === Some "10"
+  at "max-alternatives-per-rule" === Some "11"
+  at "max-guards-per-alternative" === Some "12"
+  at "max-preimages" === Some "13"
+  at "max-named-parties" === Some "14"
+  at "min-duration" === Some "PT2S"
+  at "max-duration" === Some "P31D"
+  -- The parsing direction must assign the same eight fields the same way.
+  limitsFromMetadata (limitsMetadata distinctLimits) === Some distinctLimits
+  -- And this profile still clears every CIP floor, so the assertions above are
+  -- about field identity rather than about conformance.
+  conformsToCip distinctLimits === True
+
 -- `limitsFromMetadata` inverts `limitsMetadata`, including for durations that
 -- are not a whole number of days and for sub-second precision.
 test_limitsRoundTripThroughMetadata : Script ()
 test_limitsRoundTripThroughMetadata = do
   let profiles =
         [ referenceLimits
+        , distinctLimits
         , (referenceLimits with minDuration = hours 24, maxDuration = days 30)
         , (referenceLimits with minDuration = seconds 90)
         , (referenceLimits with minDuration = convertMicrosecondsToRelTime 1500)
@@ -132,3 +170,109 @@ test_witnessPreimageBoundIsEnforced = do
   validWitness referenceLimits (CL.Witness []) === True
   -- The bound is read from the argument, not from a constant of the package.
   validWitness (referenceLimits with maxPreimages = 16) (witnessOf 9) === True
+
+-- | A test-only carrier so `validateTerms`, which lives in `Update`, can be run
+-- with a `Limits` other than `referenceLimits`. `Limits` is not `Serializable`,
+-- so the varying fields are passed individually and the record is built here.
+template PolicyProbe
+  with
+    operator : Party
+  where
+    signatory operator
+
+    nonconsuming choice ProbeValidateTerms : ()
+      with
+        admin : Party
+        now : Time
+        terms : CL.LockTerms
+        probeMaxRules : Int
+        probeMaxNamedParties : Int
+        probeMinDuration : RelTime
+        probeMaxDuration : RelTime
+      controller operator
+      do
+        validateTerms (referenceLimits with
+            maxRules = probeMaxRules
+            maxNamedParties = probeMaxNamedParties
+            minDuration = probeMinDuration
+            maxDuration = probeMaxDuration) admin now terms
+
+-- Every bound must come from the `Limits` argument rather than from a constant
+-- of the package. `referenceLimits` sets all six numeric bounds to 8, so a test
+-- that only ever passes `referenceLimits` cannot tell `l.maxLegs` from a literal
+-- `8`. Each assertion below uses a bound that differs from the reference value
+-- in both directions, so reverting any validator to a literal fails here.
+test_pureValidatorsReadBoundsFromTheirArgument : Script ()
+test_pureValidatorsReadBoundsFromTheirArgument = do
+  e <- setup ()
+  let guard = CL.Guard_Parties [e.arbiter] 1
+  let alternatives n = map (\_ -> CL.Alternative [guard]) [1 .. n]
+  let guards n = [CL.Alternative (map (\_ -> guard) [1 .. n])]
+  -- validAlternatives reads maxAlternativesPerRule: 3 alternatives are inside
+  -- the reference bound of 8, so a literal would accept them at maxAlt = 2.
+  validAlternatives (referenceLimits with maxAlternativesPerRule = 2) (alternatives 3) === False
+  validAlternatives (referenceLimits with maxAlternativesPerRule = 16) (alternatives 3) === True
+  -- 9 exceeds the reference bound, so a literal would reject it at maxAlt = 16.
+  validAlternatives (referenceLimits with maxAlternativesPerRule = 16) (alternatives 9) === True
+  validAlternatives (referenceLimits with maxAlternativesPerRule = 8) (alternatives 9) === False
+
+  -- validAlternatives also reads maxGuardsPerAlternative.
+  validAlternatives (referenceLimits with maxGuardsPerAlternative = 2) (guards 3) === False
+  validAlternatives (referenceLimits with maxGuardsPerAlternative = 16) (guards 9) === True
+
+test_legValidatorsReadBoundsFromTheirArgument : Script ()
+test_legValidatorsReadBoundsFromTheirArgument = do
+  e <- setup ()
+  let legs n = map (\i -> CL.Leg ("leg" <> show i) (account e.bob) 1.0 emptyMetadata) [1 .. n]
+  -- validLegs reads maxLegs, in both directions against the reference 8.
+  validLegs (referenceLimits with maxLegs = 2) (legs 3) === False
+  validLegs (referenceLimits with maxLegs = 16) (legs 3) === True
+  validLegs (referenceLimits with maxLegs = 16) (legs 9) === True
+  validLegs (referenceLimits with maxLegs = 8) (legs 9) === False
+  -- validOutcome bounds fixedLegs and receivers by the same argument.
+  let release n = CL.Outcome_Release (legs n) []
+  validOutcome (referenceLimits with maxLegs = 2) 100.0 (release 3) === False
+  validOutcome (referenceLimits with maxLegs = 16) 100.0 (release 9) === True
+  -- Receivers are bounded by the same maxLegs argument.
+  let receiverSet n = CL.Outcome_Release [] (map (\i -> account e.bob) [1 .. n])
+  validOutcome (referenceLimits with maxLegs = 16) 100.0 (receiverSet 1) === True
+
+-- `validateTerms` is the one validator that lives in `Update`, so it is probed
+-- through a template. Each bound is exercised at a value the reference profile
+-- would decide differently, which a literal bound could not reproduce.
+test_validateTermsReadsBoundsFromItsArgument : Script ()
+test_validateTermsReadsBoundsFromItsArgument = do
+  e <- setup ()
+  probe <- submit e.adminA $ createCmd (PolicyProbe e.adminA)
+  let rule n = CL.Rule ("r" <> show n) [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock
+  let withRules n = (termsFor e) with rules = map rule [1 .. n]
+  let probeWith terms rules parties low high = exerciseCmd probe ProbeValidateTerms with
+        admin = e.adminA, now = e.now, terms = terms
+        probeMaxRules = rules, probeMaxNamedParties = parties
+        probeMinDuration = low, probeMaxDuration = high
+  let ok terms rules parties low high =
+        submit e.adminA $ probeWith terms rules parties low high
+  let no terms rules parties low high =
+        submitMustFail e.adminA $ probeWith terms rules parties low high
+
+  -- maxRules: 3 rules sit inside the reference bound of 8, so a literal 8 would
+  -- accept them; the argument's 2 must reject.
+  ok (withRules 3) 3 8 (seconds 1) (days 365)
+  no (withRules 3) 2 8 (seconds 1) (days 365)
+  -- 12 rules exceed the reference bound, so a literal 8 would reject them; the
+  -- argument's 16 must accept.
+  ok (withRules 12) 16 8 (seconds 1) (days 365)
+  no (withRules 12) 8 8 (seconds 1) (days 365)
+
+  -- maxNamedParties: the reference terms name two parties besides the
+  -- authorizer -- bob as the leg receiver and the arbiter as enactor and guard
+  -- party -- so the bound decides at 2, well inside the reference profile's 8.
+  ok (termsFor e) 8 2 (seconds 1) (days 365)
+  no (termsFor e) 8 1 (seconds 1) (days 365)
+
+  -- maxDuration and minDuration: the reference terms expire one day out, which
+  -- the reference profile accepts. Tightening either bound through the argument
+  -- must reject the very same terms.
+  ok (termsFor e) 8 8 (seconds 1) (days 365)
+  no (termsFor e) 8 8 (seconds 1) (hours 2)
+  no (termsFor e) 8 8 (days 7) (days 365)

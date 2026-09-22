@@ -6,7 +6,7 @@ This repository provides the interface package, a reference policy evaluator a r
 
 ## Worked examples
 
-Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 66 Daml Scripts: 6 worked-example scripts, 54 mechanics proofs, and 6 policy-limit proofs.
+Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 70 Daml Scripts: 6 worked-example scripts, 54 mechanics proofs, and 10 policy-limit proofs.
 
 | CIP section 4 example | Named script | Mechanics proofs it relies on |
 | --- | --- | --- |
