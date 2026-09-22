@@ -6,6 +6,8 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 
 "$ROOT/scripts/fetch-dars.sh"
 
+# Build order. The release-identity list lives in scripts/lib/dar_identity.py
+# (PACKAGES); keep the two in step when adding a package.
 packages=(
   packages/splice-api-token-conditional-lock-v1
   packages/conditional-lock-utils

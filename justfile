@@ -54,6 +54,32 @@ generate-vectors:
 check-compatibility:
     python3 ./scripts/check-compatibility.py
 
+# Check SPLICE_PIN's tag identity against the upstream repository.
+check-pin:
+    python3 ./scripts/check-pin.py
+
+# Rebuild all first-party packages twice and confirm package IDs reproduce.
+verify-reproducible:
+    ./scripts/verify-reproducible.sh
+
+# Cut a release: verify everything, write the manifest, and tag the commit.
+release version:
+    if git rev-parse -q --verify "refs/tags/v{{version}}" >/dev/null; then echo "Tag v{{version}} already exists" >&2; exit 1; fi
+    if [ -n "$(git status --porcelain)" ]; then echo "Worktree is dirty" >&2; exit 1; fi
+    just check-pin
+    just check-compatibility
+    just verify-reproducible
+    ./scripts/test.sh
+    ./scripts/test-compatibility.sh
+    python3 ./scripts/make-release-manifest.py "{{version}}"
+    git tag -a "v{{version}}" -m "conditional-holding-lock v{{version}}"
+
+# Dry-run the release checks and manifest without tagging; never tags.
+release-dry-run version: check-pin check-compatibility verify-reproducible
+    ./scripts/test.sh
+    ./scripts/test-compatibility.sh
+    python3 ./scripts/make-release-manifest.py "{{version}}" --allow-dirty
+
 # Download and verify the pinned published Splice DARs.
 fetch-dars:
     ./scripts/fetch-dars.sh

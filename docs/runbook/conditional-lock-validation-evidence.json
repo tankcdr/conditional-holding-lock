@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-19T00:07:54.222422+00:00",
+  "checked_at": "2026-09-22T15:16:28.726246+00:00",
   "source_verification": {
-    "checked_at": "2026-09-18T23:55:32.206188+00:00",
-    "splice_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+    "checked_at": "2026-09-22T15:16:45.335065+00:00",
+    "splice_ref": "0.8.1",
     "networks": {
       "mainnet": {
-        "splice": "0.7.5",
-        "canton": "3.5.15",
+        "splice": "0.8.0",
+        "canton": "3.5.16",
         "sdk": "3.5.2"
       },
       "testnet": {
-        "splice": "0.8.0",
-        "canton": "3.5.16",
+        "splice": "0.8.1",
+        "canton": "3.5.17",
         "sdk": "3.5.2"
       }
     },
@@ -48,12 +48,7 @@
         "matches_pin": true
       }
     ],
-    "drift": [
-      "mainnet.splice: expected 0.7.4, live 0.7.5",
-      "mainnet.canton: expected 3.5.14, live 3.5.15",
-      "testnet.splice: expected 0.7.5, live 0.8.0",
-      "testnet.canton: expected 3.5.15, live 3.5.16"
-    ]
+    "drift": []
   },
   "ide_ledger": {
     "sdk": "3.5.2",
@@ -74,14 +69,14 @@
   },
   "runtimes": [
     {
-      "checked_at": "2026-09-18T23:59:59.051941+00:00",
+      "checked_at": "2026-09-22T15:12:06.694274+00:00",
       "network_runtime": "mainnet",
       "execution": "local Canton OSS, single participant and synchronizer, static time, real Ledger API",
-      "splice_version_reference": "0.7.4",
-      "canton_version_observed": "3.5.14",
+      "splice_version_reference": "0.8.0",
+      "canton_version_observed": "3.5.16",
       "sdk": "3.5.2",
       "lf": "2.1",
-      "splice_source_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+      "splice_source_ref": "0.8.1",
       "artifacts": [
         {
           "package": "splice-api-token-conditional-lock-v1",
@@ -89,14 +84,19 @@
           "dar_sha256": "419aea6ca1a7308fc2622ed81d6d5f8f08ac29d293f10c730b6552096bcaf3eb"
         },
         {
+          "package": "conditional-lock-utils",
+          "package_id": "02e296d5a8317990106aebc51db5b20e0f1391646e03d0d23d18b25e5b10e5d3",
+          "dar_sha256": "09a0f456cd22c2d88ed2e15cb73a558c5c40a707da796008e07b030a26685e03"
+        },
+        {
           "package": "conditional-lock-test-token",
-          "package_id": "4cdb5f490003178fe5458e3ec86331f5417fec83ab4a15b9bb5e7d7cb5615097",
-          "dar_sha256": "ec5519eb7a8671f95db922ef36c012549084701148d2475f2ef32e1a065ba216"
+          "package_id": "245c8e38d10ca6e3c74cd9b3a3ef770cdecf616cee5d096b405fe4d712e6844f",
+          "dar_sha256": "c3c4d101462aa9c605ea8bc92e567e9cb0cbfd0e22a4039a3afeca4d19106186"
         },
         {
           "package": "conditional-lock-test",
-          "package_id": "be31ae90b1e91c5ee1ff58a1cfa55206f9aa03d7599dcbb13c7604ba5f171e92",
-          "dar_sha256": "cdfd2471f1c55ac1d375bb34f76844ae02f306316203e2178f7da4ac7ce64a88"
+          "package_id": "7a9bb8ba33e2a01eb233e2eec929e406b39f557be491a2f8816f231798f1ce65",
+          "dar_sha256": "bbf7a517fc3c4a3a151e95b8d182744ffb6c6fd6c21db419ee56295b899bda7f"
         }
       ],
       "passed": [
@@ -145,6 +145,16 @@
         "TestOutcomes:test_releaseWithEmptyFixedLegsAndEmptyReceiversIsRejected",
         "TestOutcomes:test_ruleWithTwoAlternativesFiresOnce",
         "TestOutcomes:test_withdrawBeforeExpiryReturnsTheFundsToTheAuthorizer",
+        "TestPolicyLimits:test_belowCipFloorIsRejected",
+        "TestPolicyLimits:test_cipFloorsAreSatisfied",
+        "TestPolicyLimits:test_eachLimitKeyCarriesItsOwnField",
+        "TestPolicyLimits:test_legValidatorsReadBoundsFromTheirArgument",
+        "TestPolicyLimits:test_limitsFromMetadataRejectsMalformed",
+        "TestPolicyLimits:test_limitsMetadataMatchesAdvertised",
+        "TestPolicyLimits:test_limitsRoundTripThroughMetadata",
+        "TestPolicyLimits:test_pureValidatorsReadBoundsFromTheirArgument",
+        "TestPolicyLimits:test_validateTermsReadsBoundsFromItsArgument",
+        "TestPolicyLimits:test_witnessPreimageBoundIsEnforced",
         "TestRegistryLimits:test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected",
         "TestRegistryLimits:test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected",
         "TestRegistryLimits:test_enactObserversAreTotalAndNameOnlyThePaidAccounts",
@@ -163,14 +173,14 @@
       ]
     },
     {
-      "checked_at": "2026-09-19T00:04:15.457388+00:00",
+      "checked_at": "2026-09-22T15:16:28.726246+00:00",
       "network_runtime": "testnet",
       "execution": "local Canton OSS, single participant and synchronizer, static time, real Ledger API",
-      "splice_version_reference": "0.7.5",
-      "canton_version_observed": "3.5.15",
+      "splice_version_reference": "0.8.1",
+      "canton_version_observed": "3.5.17",
       "sdk": "3.5.2",
       "lf": "2.1",
-      "splice_source_ref": "6b82367efb9ca6f94ced604ef9350280d05b334c",
+      "splice_source_ref": "0.8.1",
       "artifacts": [
         {
           "package": "splice-api-token-conditional-lock-v1",
@@ -178,14 +188,19 @@
           "dar_sha256": "419aea6ca1a7308fc2622ed81d6d5f8f08ac29d293f10c730b6552096bcaf3eb"
         },
         {
+          "package": "conditional-lock-utils",
+          "package_id": "02e296d5a8317990106aebc51db5b20e0f1391646e03d0d23d18b25e5b10e5d3",
+          "dar_sha256": "09a0f456cd22c2d88ed2e15cb73a558c5c40a707da796008e07b030a26685e03"
+        },
+        {
           "package": "conditional-lock-test-token",
-          "package_id": "4cdb5f490003178fe5458e3ec86331f5417fec83ab4a15b9bb5e7d7cb5615097",
-          "dar_sha256": "ec5519eb7a8671f95db922ef36c012549084701148d2475f2ef32e1a065ba216"
+          "package_id": "245c8e38d10ca6e3c74cd9b3a3ef770cdecf616cee5d096b405fe4d712e6844f",
+          "dar_sha256": "c3c4d101462aa9c605ea8bc92e567e9cb0cbfd0e22a4039a3afeca4d19106186"
         },
         {
           "package": "conditional-lock-test",
-          "package_id": "be31ae90b1e91c5ee1ff58a1cfa55206f9aa03d7599dcbb13c7604ba5f171e92",
-          "dar_sha256": "cdfd2471f1c55ac1d375bb34f76844ae02f306316203e2178f7da4ac7ce64a88"
+          "package_id": "7a9bb8ba33e2a01eb233e2eec929e406b39f557be491a2f8816f231798f1ce65",
+          "dar_sha256": "bbf7a517fc3c4a3a151e95b8d182744ffb6c6fd6c21db419ee56295b899bda7f"
         }
       ],
       "passed": [
@@ -234,6 +249,16 @@
         "TestOutcomes:test_releaseWithEmptyFixedLegsAndEmptyReceiversIsRejected",
         "TestOutcomes:test_ruleWithTwoAlternativesFiresOnce",
         "TestOutcomes:test_withdrawBeforeExpiryReturnsTheFundsToTheAuthorizer",
+        "TestPolicyLimits:test_belowCipFloorIsRejected",
+        "TestPolicyLimits:test_cipFloorsAreSatisfied",
+        "TestPolicyLimits:test_eachLimitKeyCarriesItsOwnField",
+        "TestPolicyLimits:test_legValidatorsReadBoundsFromTheirArgument",
+        "TestPolicyLimits:test_limitsFromMetadataRejectsMalformed",
+        "TestPolicyLimits:test_limitsMetadataMatchesAdvertised",
+        "TestPolicyLimits:test_limitsRoundTripThroughMetadata",
+        "TestPolicyLimits:test_pureValidatorsReadBoundsFromTheirArgument",
+        "TestPolicyLimits:test_validateTermsReadsBoundsFromItsArgument",
+        "TestPolicyLimits:test_witnessPreimageBoundIsEnforced",
         "TestRegistryLimits:test_alternativeAndGuardCountsAtTheLimitAreAcceptedAndOverTheLimitRejected",
         "TestRegistryLimits:test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected",
         "TestRegistryLimits:test_enactObserversAreTotalAndNameOnlyThePaidAccounts",

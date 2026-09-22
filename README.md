@@ -32,6 +32,9 @@ just test-compatibility       # Local ledgers for both pinned Canton runtimes
 just test-compatibility testnet
 just check-vectors
 just check-compatibility      # Check live Canton version drift
+just check-pin                # Verify SPLICE_PIN matches its recorded commit
+just verify-reproducible      # Two clean builds; compare main package IDs
+just release-dry-run 0.1.0    # Release checks and manifest; never tags
 ```
 
 Recipe names use hyphens, such as `test-evm`; Just's [recipe-name grammar](https://github.com/casey/just/blob/master/GRAMMAR.md) does not allow `test:evm`. Individual builds are available as `build-daml`, `build-evm`, and `build-solana`. The recipes use the existing scripts and tools, which remain directly runnable. Run `just` for setup, fixture generation, and legacy localnet commands.
@@ -51,10 +54,10 @@ To run only the Solana proof, use `npm run test:solana` or `./scripts/test-solan
 
 `test-compatibility.sh` downloads checksum-verified official Canton binaries and runs the entire Daml suite through a real Ledger API on each pinned runtime:
 
-| Network reference, checked September 11, 2026 | Splice | Canton | Compiler |
+| Network reference, checked September 22, 2026 | Splice | Canton | Compiler |
 | --------------------------------------------- | ------ | ------ | -------- |
-| Mainnet (live has since moved to 0.7.5 / 3.5.15)              | 0.7.4  | 3.5.14 | 3.5.2    |
-| Testnet (live has since moved to 0.8.0 / 3.5.16, not covered) | 0.7.5  | 3.5.15 | 3.5.2    |
+| Mainnet                                       | 0.8.0  | 3.5.16 | 3.5.2    |
+| Testnet                                       | 0.8.1  | 3.5.17 | 3.5.2    |
 
 These are isolated local ledgers with controlled time, one participant, and one synchronizer. They use unused loopback ports and stop their own processes on exit. Downloads, logs, package IDs, and JSON results stay in gitignored `.localnet/`. No Docker stack or network funds are needed. The first matrix run downloads about 570 MB.
 
@@ -68,7 +71,7 @@ python3 scripts/check-compatibility.py
 
 ## Dependencies and layout
 
-[SPLICE_PIN](SPLICE_PIN) is a JSON manifest pinning a specific Splice `main` commit, package IDs, and SHA-256 checksums. `fetch-dars.sh` verifies its cache and downloads published DARs into gitignored `.dars/`. It replaces incomplete or incorrect downloads only after validation. `SPLICE_DARS_REF` can select another source ref, but the bytes must still match the reviewed pin.
+[SPLICE_PIN](SPLICE_PIN) is a JSON manifest pinning Splice release tag `0.8.1` and recording the tag's commit for moved-tag detection, along with package IDs and SHA-256 checksums. `fetch-dars.sh` verifies its cache and downloads published DARs into gitignored `.dars/`. It replaces incomplete or incorrect downloads only after validation. `SPLICE_DARS_REF` can select another source ref, but the bytes must still match the reviewed pin.
 
 | Path                                             | Purpose                                                                                                                          |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -80,9 +83,15 @@ python3 scripts/check-compatibility.py
 | `contracts/evm/`                                 | Solidity byte-domain reference and tests; no forge-std checkout needed                                                           |
 | `contracts/solana/`                              | Solana SBF hash reference and LiteSVM tests, with a pinned Cargo lockfile and local Rust toolchain                               |
 | `fixtures/runtime-versions.json`                 | Network runtime snapshots and official Canton archive checksums                                                                  |
+| `CHANGELOG.md`                                   | Release history, build inputs, and package identity per release                                                                  |
+| `docs/release-notes/`                            | GitHub Release notes for each tagged version                                                                                     |
 | `localnet/`, `localnet-overrides/`               | Legacy cn-quickstart Splice layout, separate from the proof matrix                                                               |
 
 Splice source and downloaded DARs are never committed here. A future Splice implementation PR belongs on a Splice fork.
+
+## Releases
+
+Releases are cut from a `v<version>` git tag, starting at `v0.1.0`; the Daml packages keep `version: 1.0.0` in `daml.yaml`. The three consumer DARs are attached to the GitHub Release, and the generated `conditional-lock-release.json` manifest is attached alongside them. Release mechanics live in two files and nowhere else: [CHANGELOG.md](CHANGELOG.md) for the per-release history, the versioning rule, and package identity, and [docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the release body. `just release-dry-run <version>` runs every release check except the clean-worktree check, and never tags.
 
 ## Reference scope
 

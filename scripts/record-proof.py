@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Validate the matrix result and record the exact artifacts it exercised."""
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import sys
-import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+import dar_identity  # noqa: E402
+
 network, run_path = sys.argv[1:]
 run = Path(run_path)
 config = json.loads((ROOT / "fixtures/runtime-versions.json").read_text())[network]
@@ -41,12 +42,9 @@ required = {
 if version != config["canton"] or not required.issubset(results) or any("result" not in r for r in results.values()):
     raise SystemExit("Runtime mismatch, missing core proofs, or failed scripts; see " + str(run))
 artifacts = []
-for package in ("splice-api-token-conditional-lock-v1", "conditional-lock-utils", "conditional-lock-test-token", "conditional-lock-test"):
-    path = ROOT / f"packages/{package}/.daml/dist/{package}-1.0.0.dar"
-    with zipfile.ZipFile(path) as archive:
-        manifest = archive.read("META-INF/MANIFEST.MF").decode().replace("\r\n ", "").replace("\n ", "")
-        main = manifest.split("Main-Dalf: ")[1].splitlines()[0]
-    artifacts.append({"package": package, "package_id": Path(main).stem[-64:], "dar_sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+for package, _attached in dar_identity.PACKAGES:
+    path = dar_identity.built_dar_path(package)
+    artifacts.append(dar_identity.dar_artifact(package, path))
 evidence = {
     "checked_at": datetime.now(timezone.utc).isoformat(),
     "network_runtime": network,
