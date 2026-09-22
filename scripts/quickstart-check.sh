@@ -62,14 +62,10 @@ run_dir="$(mktemp -d "$ROOT/.localnet/quickstart-$NETWORK.XXXXXX")"
 conditional_lock_sandbox_start "$NETWORK" "$run_dir"
 
 echo "==> uploading consumer DARs in dependency order"
-for dar in splice-api-token-conditional-lock-v1-1.0.0.dar conditional-lock-utils-1.0.0.dar conditional-lock-test-token-1.0.0.dar; do
-  status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$CL_JSON_PORT/v2/packages" \
-    -H "Content-Type: application/octet-stream" --data-binary @"$QUICKSTART_DARS/$dar")"
-  case "$status" in
-    2??|409) ;;
-    *) echo "Unexpected status $status uploading $dar" >&2; exit 1 ;;
-  esac
-done
+LEDGER_JSON_API="http://127.0.0.1:$CL_JSON_PORT" "$ROOT/scripts/deploy-dars.sh" \
+  "$QUICKSTART_DARS/splice-api-token-conditional-lock-v1-1.0.0.dar" \
+  "$QUICKSTART_DARS/conditional-lock-utils-1.0.0.dar" \
+  "$QUICKSTART_DARS/conditional-lock-test-token-1.0.0.dar"
 
 echo "==> building the quickstart"
 (cd "$ROOT/docs/quickstart" && dpm build)

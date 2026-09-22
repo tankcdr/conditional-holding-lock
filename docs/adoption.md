@@ -484,11 +484,10 @@ If you follow this document, the result is evidence the CIP thread needs. The op
 of the community is whether anyone would adopt an out-of-tree package before Splice merges it; a
 registry, an application, or a wallet that did is the concrete answer.
 
-- **`docs/adoption-evidence.md`** — the adoption evidence log. **It does not exist yet**; it is the
-  next piece of work, and this is a forward reference, not a link. It will record each observed
+- **[`adoption-evidence.md`](adoption-evidence.md)** — the adoption evidence log. It records each observed
   adoption: who adopted which packages at which package IDs, on which network, what they built, and
-  what broke. It is also where the reference deployment on a real network is recorded, which is the
-  next step after the local quickstart of section 6.
+  what broke. The reference deployment on a real network is also recorded here, but does not count
+  as adoption outside this repository.
 - **The Splice PR** — <https://github.com/canton-network/splice/pull/7294> is where the interface is
   proposed to Splice and where the CIP discussion lives. Adoption reports belong there too.
 - **This repository's issues** — <https://github.com/tankcdr/conditional-holding-lock/issues> for

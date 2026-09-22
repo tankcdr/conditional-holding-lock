@@ -15,6 +15,7 @@ contracts/evm/lib/
 # Downloaded Splice interface DARs (compile-time deps).
 /.dars/
 /docs/quickstart/dars/
+/examples/devnet-escrow/dars/
 
 # Localnet
 .env

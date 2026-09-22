@@ -66,6 +66,18 @@ verify-reproducible:
 quickstart *dar_dir:
     ./scripts/quickstart-check.sh "$@"
 
+# Upload DARs to a participant. Set LEDGER_JSON_API and, if the participant requires auth, LEDGER_TOKEN.
+devnet-deploy *args:
+    ./scripts/deploy-dars.sh "$@"
+
+# Run the escrowed-DvP reference deployment and record its evidence.
+devnet-reference *args:
+    ./scripts/devnet-reference.sh "$@"
+
+# Compare the live DevNet Splice version against the pinned release in SPLICE_PIN.
+devnet-status:
+    ./scripts/devnet-status.sh
+
 # Cut a release: verify everything, write the manifest, and tag the commit.
 release version:
     if git rev-parse -q --verify "refs/tags/v{{version}}" >/dev/null; then echo "Tag v{{version}} already exists" >&2; exit 1; fi

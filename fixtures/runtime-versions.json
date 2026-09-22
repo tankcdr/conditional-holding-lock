@@ -15,5 +15,13 @@
     "info_url": "https://docs.test.global.canton.network.sync.global/info",
     "versions_url": "https://docs.test.global.canton.network.sync.global/app_dev/overview/version_information.html",
     "canton_archive_sha256": "1b178105f429f0bb188fd4ccc22a9a19b79d236b829457cc870416f9277de93d"
+  },
+  "devnet": {
+    "splice": "0.8.3",
+    "canton": "3.5.18",
+    "sdk": "3.5.2",
+    "info_url": "https://docs.dev.global.canton.network.sync.global/info",
+    "versions_url": "https://docs.dev.global.canton.network.sync.global/app_dev/overview/version_information.html",
+    "informational": true
   }
 }

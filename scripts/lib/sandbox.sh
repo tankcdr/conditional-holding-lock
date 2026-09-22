@@ -48,8 +48,17 @@ for s in sockets:
     s.close()
 PY
 )
-  echo "==> $network sandbox: $binary (evidence: $run_dir)"
-  "$binary" sandbox --static-time \
+  local time_flag time_mode
+  if [[ "${CL_SANDBOX_WALL_CLOCK:-}" == "1" ]]; then
+    time_flag=()
+    time_mode="wall-clock"
+  else
+    time_flag=(--static-time)
+    time_mode="static-time"
+  fi
+
+  echo "==> $network sandbox: $binary (evidence: $run_dir) [$time_mode]"
+  "$binary" sandbox ${time_flag[@]+"${time_flag[@]}"} \
     --ledger-api-port "$ledger" --admin-api-port "$admin" --json-api-port "$json" \
     --sequencer-public-port "$sequencer" --sequencer-admin-port "$seq_admin" --mediator-admin-port "$mediator" \
     --canton-port-file "$run_dir/ports.json" --log-file-name "$run_dir/canton.log" \

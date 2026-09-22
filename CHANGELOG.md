@@ -36,9 +36,14 @@ hash; every interface edit invalidates every adopter's pin, and there is no in-p
 - Release tooling: `scripts/check-pin.py`, `scripts/verify-reproducible.sh`,
   `scripts/make-release-manifest.py`, and the shared `scripts/lib/dar_identity.py`, which is now
   the single implementation of the DAR `Main-Dalf:` parse outside `scripts/fetch-dars.py`.
+- Reference deployment scripts: `scripts/deploy-dars.sh` (the single JSON Ledger API /v2/packages
+  upload path, now also used by `scripts/quickstart-check.sh`), `scripts/devnet-reference.sh`,
+  `scripts/record-reference-proof.py`, and `scripts/devnet-status.sh`.
+- `examples/devnet-escrow/` — the escrowed-DvP-with-dispute-window script the reference deployment runs.
+- `docs/adoption-evidence.md` — adoption evidence log and reference-deployment record.
 - Just recipes `check-pin`, `verify-reproducible`, `release <version>`, and
-  `release-dry-run <version>`, mirrored as npm scripts (pass the version after `--`, as in
-  `npm run release -- 0.1.0`).
+  `release-dry-run <version>` (pass the version after `--`, as in `npm run release -- 0.1.0`),
+  and `devnet-deploy`, `devnet-reference`, and `devnet-status`, all mirrored as npm scripts.
 - This `CHANGELOG.md` and the release notes under `docs/release-notes/`.
 
 ### Build and dependency notes
@@ -53,6 +58,9 @@ hash; every interface edit invalidates every adopter's pin, and there is no in-p
   so each reads its bounds from an explicit `Limits` argument rather than from a module constant.
 - Refreshed the network reference to the live values checked 2026-09-22: Mainnet Splice 0.8.0 /
   Canton 3.5.16, Testnet Splice 0.8.1 / Canton 3.5.17. `just check-compatibility` exits 0 again.
+- Added an informational DevNet row to `scripts/check-compatibility.py` and
+  `fixtures/runtime-versions.json`. DevNet differences do not fail the check because DevNet runs
+  ahead of the pinned release; live DevNet reports Splice 0.8.3 / Canton 3.5.18.
 
 ### Build inputs
 

@@ -86,7 +86,9 @@ python3 scripts/check-compatibility.py
 | `CHANGELOG.md`                                   | Release history, build inputs, and package identity per release                                                                  |
 | `docs/release-notes/`                            | GitHub Release notes for each tagged version                                                                                     |
 | `docs/adoption.md`                               | Consumer adoption guide: dependency sets, verification, registry/application/wallet paths, compatibility                          |
+| `docs/adoption-evidence.md`                      | Adoption evidence log and reference-deployment record                                                                             |
 | `docs/quickstart/`                               | The minimal consumer project `scripts/quickstart-check.sh` builds and runs end to end                                            |
+| `examples/devnet-escrow/`                        | The escrowed-DvP-with-dispute-window script the reference deployment runs                                                         |
 | `localnet/`, `localnet-overrides/`               | Legacy cn-quickstart Splice layout, separate from the proof matrix                                                               |
 
 Splice source and downloaded DARs are never committed here. A future Splice implementation PR belongs on a Splice fork.
@@ -98,6 +100,8 @@ Releases are cut from a `v<version>` git tag, starting at `v0.1.0`; the Daml pac
 ## Adopting the DARs
 
 [docs/adoption.md](docs/adoption.md) is the document for someone outside this repository: it takes a registry, an application, or a wallet from an empty project to a working conditional lock against the released DARs, without waiting for Splice to merge the interface. It covers which of the four packages to depend on, how to fetch and verify them, the `daml.yaml` each audience writes, the wallet's OpenAPI surface, and what re-pinning costs while this is `0.x`. `just quickstart` runs its end-to-end example on an isolated sandbox.
+
+The reference deployment runs the CIP's worked example of escrowed delivery-versus-payment via `just devnet-reference`, which executes it under wall-clock time—required for time-bounded guards—defaulting to an isolated sandbox but targeting live network when LEDGER_JSON_API and optional LEDGER_TOKEN are set. Evidence is recorded in [docs/adoption-evidence.md](docs/adoption-evidence.md). Use `just devnet-status` to compare the live DevNet Splice version against SPLICE_PIN (informational only). No Canton Coin or network funds are required.
 
 ## Reference scope
 
