@@ -19,6 +19,10 @@ package coordinates stay still.
 ## [Unreleased]
 
 ### Changed
+- The escrowed-DvP reference deployment and 57 of the 70 Daml Script tests now run against a
+  Docker localnet at the Mainnet release, not only against in-process sandboxes. The 13 that
+  do not are the ones needing a controllable clock; the localnet participant reports
+  `staticTime.supported: false`.
 
 - The localnet stack is now vendored from Splice's own `cluster/compose/localnet/` at the
   Mainnet release (Splice 0.8.0, commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`), rather
