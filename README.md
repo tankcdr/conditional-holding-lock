@@ -116,19 +116,21 @@ The Solana proof establishes matching SHA-256 and Keccak-256 byte semantics in a
 The localnet stack is Splice's own compose files, vendored verbatim under `localnet-overrides/splice-0.8.0/` (Splice commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`, tag `0.8.0`), which is what Canton Mainnet runs today. The driver (`scripts/lib/localnet-compose.sh`, project name `conditional-lock-localnet`) runs Splice's compose and resource-constraints files with the `sv`, `app-provider`, and `app-user` profiles in their `auth-on` variants, using Splice's `compose.env` and `env/common.env` as env files. The only first-party file is `localnet-overrides/conditional-lock.compose.yaml`, a compose layer that pins the app-provider participant's admin token.
 
 ```bash
-./scripts/localnet-sync.sh [<tag>] [--check]   # Materialize/update the Splice tree
-./scripts/localnet.sh [--down] [--clean] [--no-bootstrap]  # Up, wait, bootstrap
-./scripts/localnet-bootstrap.sh                # Re-upload DARs without restarting
-./scripts/localnet-prove.sh                    # Escrowed-DvP proof (output to docs/runbook/localnet-mainnet-0.8.0-reference-evidence.json)
+./scripts/localnet-sync.sh [<tag>] [--check]  # Materialize/update the Splice tree
+./scripts/localnet.sh                         # Up, wait for readiness, bootstrap
+./scripts/localnet.sh --down                  # Stop, keep volumes
+./scripts/localnet.sh --clean                 # Stop, delete volumes
+./scripts/localnet-bootstrap.sh               # Build DARs, upload three first-party ones
+./scripts/localnet-prove.sh                   # Escrowed-DvP proof, writes evidence
 ```
 
-Each script also has a `just` recipe and an `npm run localnet:…` script. Note that `just check-compatibility` fails when `.env.localnet.example`'s `IMAGE_TAG` is not the Splice version live on Mainnet, so `just release` fails until you re-sync the localnet with `./scripts/localnet-sync.sh`.
+Each script also has a `just` recipe and an `npm run localnet:<name>` script. Note that `just check-compatibility` fails when `.env.localnet.example`'s `IMAGE_TAG` is not the Splice version live on Mainnet, so `just release` fails until you re-sync the localnet with `./scripts/localnet-sync.sh`.
 
 Two credentials are in play, both unsafe and local-only by design, both from `scripts/lib/localnet_token.py`. The default is an HS256 JWT for user `ledger-api-user`, audience `https://canton.network.global`, secret `unsafe`; the helper reads the user from `env/app-provider-auth-on.env` and the secret from `conf/canton/app-provider/app-auth.conf` in the vendored tree. DAR upload uses it. With `--admin`, the tool returns the participant admin token that `localnet-overrides/conditional-lock.compose.yaml` pins for the app-provider participant, carrying claims `ClaimPublic`, `ClaimAdmin`, and `ClaimActAsAnyParty`. Anything that runs Daml Script needs the admin token: Daml Script allocates its own parties at runtime, Canton grants act-as rights only to the user named in the `AllocateParty` request's `userId` field (which Daml Script does not set; `dpm script --user-id` changes only the submitting user), and Canton 3.5.16 has no `CanActAsAnyParty` right to pre-grant. Splice's vendored tree already enables the admin claim; our compose layer adds the act-as-any-party claim and pins the token value. Authentication stays on; this is a stronger named credential, not a bypass. Never reuse either credential against a real network.
 
 Daml Script derives deterministic party-id hints (e.g., `alice-d4d95138`), so a second proof run against the same persistent participant fails at `allocateParty` with "Party already exists". The preflight detects this and instructs you to run `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
 
-The 70-script Daml test suite does not run on this localnet: all 70 scripts allocate the same party names, so after the first script the rest collide; additionally, the participant reports `staticTime.supported: false` and some scripts need static time to pass a deadline. Use `dpm test` or `./scripts/test-compatibility.sh` for the suite; the localnet proves the lock against the live Mainnet configuration.
+The 70-script Daml test suite does not run on this localnet: all 70 scripts allocate the same party names, so after the first script the rest collide; additionally, the participant reports `staticTime.supported: false` and some scripts need static time to pass a deadline. Use `dpm test` or `./scripts/test-compatibility.sh` for the suite—each gets a fresh controlled-time ledger per run. The localnet proves the lock against the Splice release Mainnet runs.
 
 Ports follow Splice's pattern (suffixes 901 gRPC Ledger, 902 admin, 975 JSON Ledger, 903 validator admin): app-provider is 3975 JSON / 3901 gRPC / 3903 validator; app-user is 2975 / 2901 / 2903; SV is 4975 / 4901 / 4903. UIs: app-user wallet `http://wallet.localhost:2000`, app-provider wallet `http://wallet.localhost:3000`, SV `http://sv.localhost:4000`, scan `http://scan.localhost:4000`. Postgres is on host port 5433 (`DB_PORT` in `.env.localnet.example`), not Splice's 5432, because another project's stack commonly holds 5432.
 

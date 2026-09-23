@@ -42,12 +42,14 @@ package coordinates stay still.
 - `localnet-overrides/conditional-lock.compose.yaml` — the only first-party file in the
   overrides directory, a compose layer pinning the app-provider participant's admin token
   (`scripts/lib/localnet_token.py --admin`). Required for Daml Script to run under auth-on
-  profiles (Daml Script allocates its own parties; Canton 3.5.16 has no pre-granted
-  CanActAsAnyParty right).
-- `scripts/localnet-prove.sh` now includes a preflight check: if the participant already
-  hosted a reference deployment, Daml Script will fail on allocateParty (deterministic
-  party-id hints cause collision on rerun). The preflight instructs you to run
-  `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
+  profiles (Daml Script allocates its own parties; Canton 3.5.16 has no CanActAsAnyParty
+  right to pre-grant).
+- `scripts/localnet-prove.sh` runs the escrowed-DvP proof against the localnet's
+  app-provider participant, writing evidence to
+  `docs/runbook/localnet-mainnet-<IMAGE_TAG>-reference-evidence.json`. It now includes a
+  preflight check: if the participant already hosted a reference deployment, Daml Script fails
+  on allocateParty (deterministic party-id hints cause collision on rerun). The preflight
+  instructs you to run `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
 
 ## [0.1.0] - 2026-09-22
 

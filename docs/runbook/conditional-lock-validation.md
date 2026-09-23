@@ -13,7 +13,7 @@ This report answers "does the reference implementation work, and against what". 
 | Java | Global JDK 26; project tests select installed JDK 21 | Tests no longer depend on an unsupported global Java or stale `JAVA_HOME` |
 | Foundry | 1.3.6, Solidity 0.8.24 | Both byte-domain hash algorithms tested |
 | Solana | Agave CLI/runtime dependencies 3.1.14, platform-tools v1.52, Rust 1.89.0, LiteSVM 0.9.1 | Compiled SBF program matches both hashes on the shared vectors in a local VM |
-| Existing shared Docker stack | Splice 0.6.7; Canton image 0.6.8 reports engine 3.5.4 | Older than the networks; owned by another checkout and left running |
+| Docker localnet stack | Splice 0.8.0; the participant's `/v2/version` reports Canton 3.5.16 | Splice's own `cluster/compose/localnet` tree at the Mainnet release, vendored under `localnet-overrides/splice-0.8.0/`; `check-compatibility.py`'s localnet row fails when Mainnet moves past it |
 | Mainnet reference (pin dated 2026-09-22) | Splice 0.8.0 / Canton 3.5.16 / SDK 3.5.2 | Isolated local Ledger API matrix target; matches live mainnet, `check-compatibility.py` reports no drift |
 | Testnet reference (pin dated 2026-09-22) | Splice 0.8.1 / Canton 3.5.17 / SDK 3.5.2 | Isolated local Ledger API matrix target; matches live testnet, `check-compatibility.py` reports no drift |
 
