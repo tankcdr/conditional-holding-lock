@@ -38,7 +38,7 @@ if (!imageTag) {
   throw new Error(
     "No IMAGE_TAG found (checked $IMAGE_TAG and .env.localnet). The Splice image tag is " +
       "recorded into the evidence as splice_image_tag and must never be guessed. " +
-      "Fix .env.localnet with ./scripts/localnet-sync.sh.",
+      "A .env.localnet without IMAGE_TAG predates the Splice compose stack: delete it and rerun ./scripts/localnet.sh.",
   );
 }
 
