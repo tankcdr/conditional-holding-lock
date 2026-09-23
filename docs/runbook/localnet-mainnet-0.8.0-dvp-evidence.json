@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-23T02:46:08.538544+00:00",
+  "checked_at": "2026-09-23T02:55:55.290512+00:00",
   "network_runtime": "localnet-mainnet",
   "execution": "CIP-0112 DvP between registries settled atomically in one transaction: a real Canton Coin (Amulet) payment leg against TestTokenV2 delivered under our conditional-lock interface, plus the expiry path returning the locked delivery when no alternative is satisfied.",
   "release": "unreleased",
-  "git_commit": "064997e2fff92129135858b3d53ebb34134d724f",
+  "git_commit": "3d4f852983935eadd17a6cfcf961625ca83fcf84",
   "git_dirty": true,
   "splice_version_reference": "0.8.1",
   "splice_source_ref": "0.8.1",
@@ -43,33 +43,33 @@
   "synchronizer_id": "global-domain::1220d6a5acd75c65a27bdff8cc03c69a576115c33507d69ace33847b2461c4927127",
   "settlements": [
     {
-      "lock_id": "dvp-70d94106",
-      "update_id": "1220056c8f9ebc79098d7aa6793827cad8053128610066ee0e3a9abcfe54585151f6",
-      "effective_at": "2026-09-23T02:45:22.645538Z",
+      "lock_id": "dvp-12622683",
+      "update_id": "12203d62133448c6a8b3c438c922c920718f2315fc1ffc84606b9b7666d00cc56f54",
+      "effective_at": "2026-09-23T02:54:43.103969Z",
       "command_count": 2,
       "delivery": {
         "instrument_id": "TTKN",
         "amount": "100.0000000000",
         "package_name": "splice-test-token-v2",
-        "holding_contract_id": "00f28079445121aff1648075f9f12d27bd0b5036fadb3dd5fe3dfee4e5ae998757ca1212207d77d038170348f7c564f80cd95589367213af44184f060754efca20514333f2",
+        "holding_contract_id": "00d38f77c394bee5da03d2d48ef25b0476a7416bd2c9279c51d812bf09d4a790a8ca121220c4c2d5c8da4fe0732c903b020935c4998bc67b844e7c9f628e5f424e9a87f45f",
         "receiver": "app_user_conditionallock-localparty-1::1220d16dcd157e297fa0911df916861f082efcc5aecc42c811f1e3f3fdb9c05a2e85"
       },
       "payment": {
         "instrument_id": "Amulet",
         "amount": "42.0000000000",
         "package_name": "splice-amulet",
-        "holding_contract_id": "009d67f4afeb435aef23af410fd884b3db423aacb7704090a7171b96150c11fc9eca121220ee47dd919f7344970fbffa7935b4b07e5a0491ceff859b9c17c18f6f542b1f4c",
+        "holding_contract_id": "00375be5013c59de0fe7a5665836fa8a0f0b9e10586240e7f99d5202e02281177cca1212202d060929013adb44fb9035be30367c2a11888987d5e13b444b355cfa4c2b9217",
         "receiver": "app_provider_conditionallock-localparty-1::1220fa3afbf6958169845f9b4860588463d24b1bbbecf66f325875705c6c3c48a31d",
         "sender": "app_user_conditionallock-localparty-1::1220d16dcd157e297fa0911df916861f082efcc5aecc42c811f1e3f3fdb9c05a2e85"
       },
       "transfer_leg_ids": [
-        "dvp-70d94106/settle/delivery"
+        "dvp-12622683/settle/delivery"
       ],
       "amulet_allocation_cids": [
-        "00fc9a01550f4c85f64a621c4a279675d0f56c31c1367418afcb42943b319ec34bca12122089bc829f43558fbed9e142eb8b114b2320855b04e23bf63a175408b5babfbc13",
-        "004a3743ff73de3c72c7a1dd4d3de5c7bc131af24431ea7034ea9527625909c1f7ca1212200ffc5db415b090b9f460b70ecdd537701d123d485bff73db580d3179953605cd"
+        "0033a2e246c96dd0f402590dfb6cf05d785f8f43e696705fb59a7a91a22c254766ca12122099bfe4e5a86668283ebc23a28b91bcea78df376316910ba3bfa6086c5eb2b1f3",
+        "00a18a63b4d1221f5dc9fc96f6003f59ee784c90f241303a0e7987478d5ec7a90bca12122052bac6f54449f93bf8584ee2404389671158f87290237df3dae3a84a04b67efb"
       ],
-      "lock_contract_id": "00cb43d2b516b8534edae03f9d86467b59fc5c50f939f7f0b6e1d88c814058826aca1212204f68ec563352a79e4631d3fe3c4834be5584289473977211ad4ee37ce1ed7210",
+      "lock_contract_id": "00022b856cc17c81eeef99dc4afa299dae1846b07f0a43b28355bc2657893199a2ca1212205920e801d3f1f79297b7cd883eb79816eb30093d35c6a6d8130b895f6852f1bd",
       "choices_exercised": [
         "SettlementFactory_SettleBatch",
         "Allocation_Settle",
@@ -77,15 +77,15 @@
       ]
     },
     {
-      "lock_id": "dvp-expiry-f1c7de5e",
-      "deadline": "2026-09-23T02:45:48.947Z",
-      "expires_at": "2026-09-23T02:46:03.947Z",
-      "enact_rejected_at": "2026-09-23T02:45:51.957000Z",
+      "lock_id": "dvp-expiry-a1ae7b3c",
+      "deadline": "2026-09-23T02:55:09.394Z",
+      "expires_at": "2026-09-23T02:55:24.394Z",
+      "enact_rejected_at": "2026-09-23T02:55:12.409000Z",
       "enact_rejection": "no alternative is satisfied",
-      "expire_update_id": "12206343ae0c56178e69ecc76645d384ac66e962574048195e06ca3e88886291122d",
-      "returned_contract_id": "00bbe59057eea9b067d40527c30b8d68b7cddb3736fc3c1a630c2cb11099a37026ca121220115baf65b1c370d7e78ff21d8d1ba8cdc20493042722b4da0215b4ad93a43e3c",
+      "expire_update_id": "1220c198b80bad4b922d70f867857a985d2ed79f7f21393c4d19bee7cc3fe818044f",
+      "returned_contract_id": "001d845b6ebb20846a8e6028cf2ebcbc5646e0ce4777e0180d26b67d8fb70066ebca121220567b11c9b373d269dc46d0af94abe66c894b2ffe0932d408b9d030d6e827c334",
       "returned_amount": "100.0000000000",
-      "amulet_allocation_withdrawn_cid": "00bf99149124cb5515f55aa248aeefe3c9bba8b94acd5de4b5ebc12e37817e081aca1212204976c840a7bd907e45d14b1e3648168fd5fad03af7ef3a019fe9da141dc77b74"
+      "amulet_allocation_withdrawn_cid": "00ff2b0789f1368a30dc6da916b61153fd05a1e38d6a4c26dbcde6bb15e5989f8eca12122092b01bdee8e019ffbcaadb1f17c9e17f1fb262fbfb369d4bf8e3093a7e321d98"
     }
   ],
   "update_id_source": "the JSON Ledger API v2 submit-and-wait-for-transaction response; unlike the escrowed-DvP reference path (which runs through Daml Script and cannot return ledger update IDs, see UPDATE_ID_FALLBACK), this harness submits directly and records the update ID the ledger returned. The recorded IDs are then cross-checked: the harness independently re-read each update from the participant's own /v2/updates/update-by-id after the fact (settlement-update.json, expire-update.json), and this file rejects the evidence unless the IDs, timestamps, synchronizer, root choices, and transfer amounts in those raw responses agree with what is claimed here",
@@ -94,7 +94,7 @@
       "ConditionalLock_Enact",
       "SettlementFactory_SettleBatch"
     ],
-    "settlement_update_id_recorded": "1220056c8f9ebc79098d7aa6793827cad8053128610066ee0e3a9abcfe54585151f6",
-    "expire_update_id_recorded": "12206343ae0c56178e69ecc76645d384ac66e962574048195e06ca3e88886291122d"
+    "settlement_update_id_recorded": "12203d62133448c6a8b3c438c922c920718f2315fc1ffc84606b9b7666d00cc56f54",
+    "expire_update_id_recorded": "1220c198b80bad4b922d70f867857a985d2ed79f7f21393c4d19bee7cc3fe818044f"
   }
 }
