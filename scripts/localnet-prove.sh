@@ -59,6 +59,12 @@ LEDGER_USER_ID="${LEDGER_USER_ID:-$(python3 "$ROOT/scripts/lib/localnet_token.py
 export LEDGER_USER_ID
 
 # Preflight: the reference deployment's four parties, from a previous run.
+#
+# The header file is removed as soon as the probe below is done, NOT left to
+# the EXIT trap: this script ends in `exec`, and bash replaces the process
+# image without running EXIT traps, so the trap alone would leak a file
+# containing the bearer token on every successful run. The trap stays as a
+# backstop for the failure paths that do exit normally.
 header_file="$(mktemp)"
 trap 'rm -f "$header_file"' EXIT
 chmod 600 "$header_file"
@@ -75,6 +81,7 @@ print(" ".join(sorted({
     if d.get("isLocal") and pattern.match(d["party"])
 })))
 ')"
+rm -f "$header_file"
 if [[ -n "$stale" ]]; then
   cat >&2 <<MSG
 [ERROR] this participant has already hosted a reference deployment: $stale
