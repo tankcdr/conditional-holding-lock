@@ -49,18 +49,18 @@ localnet_env
 localnet_check_container_names
 
 # Both wait loops probe the app-provider node, the one this repository uploads
-# to and proves against. Derive their URLs from LEDGER_JSON_API rather than
-# writing :3975 and :3903 down a second time, so changing the port in
-# .env.localnet cannot leave this script polling the old one. Splice's port
-# pattern is <node><suffix>: 975 is the participant JSON API, 903 the validator
-# admin API, and the leading digit selects the node (3 = app-provider).
+# to and proves against. Their URLs come from scripts/lib/localnet_endpoints.py,
+# the single derivation of every localnet endpoint from LEDGER_JSON_API, so
+# changing the port in .env.localnet cannot leave this script polling the old
+# one and the <node><suffix> port rule is written down in exactly one place.
 JSON_BASE="${LEDGER_JSON_API:?.env.localnet must set LEDGER_JSON_API}"
 JSON_BASE="${JSON_BASE%/}"
-_json_port="${JSON_BASE##*:}"
-case "$_json_port" in
-  *975) VALIDATOR_BASE="${JSON_BASE%:*}:${_json_port%975}903" ;;
-  *) VALIDATOR_BASE="" ;;
-esac
+ENDPOINTS_LIB="$ROOT/scripts/lib/localnet_endpoints.py"
+endpoint() { python3 "$ENDPOINTS_LIB" --ledger-json-api "$JSON_BASE" --get "$1"; }
+VALIDATOR_BASE="$(endpoint provider_validator)"
+USER_JSON_API="$(endpoint user_json_api)"
+SV_JSON_API="$(endpoint sv_json_api)"
+SCAN_BASE="$(endpoint scan)"
 
 info "starting Splice localnet ${IMAGE_TAG} (project ${LOCALNET_PROJECT}, network ${DOCKER_NETWORK:-localnet})"
 info "tree: ${LOCALNET_DIR}"
@@ -83,12 +83,9 @@ for i in $(seq 1 120); do
   sleep 5
 done
 
-if [ -z "$VALIDATOR_BASE" ]; then
-  info "LEDGER_JSON_API port is not a Splice <node>975 port; skipping the validator wait"
-fi
-info "waiting for the app-provider validator at ${VALIDATOR_BASE:-<skipped>} (SV onboarding takes a few minutes)"
+info "waiting for the app-provider validator at $VALIDATOR_BASE (SV onboarding takes a few minutes)"
 for i in $(seq 1 240); do
-  if [ -z "$VALIDATOR_BASE" ] || curl -sf -o /dev/null "$VALIDATOR_BASE/api/validator/readyz" 2>/dev/null; then
+  if curl -sf -o /dev/null "$VALIDATOR_BASE/readyz" 2>/dev/null; then
     info "app-provider validator is ready"
     break
   fi
@@ -105,7 +102,7 @@ if $BOOTSTRAP; then
 fi
 
 info "localnet ready."
-info "  app-provider  JSON API http://localhost:3975   gRPC ledger localhost:3901   wallet http://wallet.localhost:3000"
-info "  app-user      JSON API http://localhost:2975   gRPC ledger localhost:2901   wallet http://wallet.localhost:2000"
-info "  sv            JSON API http://localhost:4975   gRPC ledger localhost:4901   scan   http://scan.localhost:4000"
+info "  app-provider  JSON API $JSON_BASE   gRPC ledger $(endpoint provider_ledger)   validator $VALIDATOR_BASE   wallet $(endpoint provider_wallet_ui)"
+info "  app-user      JSON API $USER_JSON_API   gRPC ledger $(endpoint user_ledger)   validator $(endpoint user_validator)   wallet $(endpoint user_wallet_ui)"
+info "  sv            JSON API $SV_JSON_API   gRPC ledger $(endpoint sv_ledger)   scan $SCAN_BASE"
 info "Stop with ./scripts/localnet.sh --down"
