@@ -54,6 +54,18 @@ package coordinates stay still.
   preflight check: if the participant already hosted a reference deployment, Daml Script fails
   on allocateParty (deterministic party-id hints cause collision on rerun). The preflight
   instructs you to run `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
+- A new `integration/` package proves CIP-0112 DvP between registries on the localnet: a real
+  Amulet (Canton Coin) payment leg against a TestTokenV2 delivery leg under the conditional
+  lock, settled atomically in one transaction via the JSON Ledger API. The harness generates
+  fresh `TokenRules`, factory, and lock IDs per run and looks up parties before allocating,
+  so it is re-runnable without ledger reset. Evidence is written by
+  `scripts/record-reference-proof.py --kind dvp` to
+  `docs/runbook/localnet-mainnet-<IMAGE_TAG>-dvp-evidence.json`, capturing the real update ID
+  carrying both legs. `scripts/localnet-bootstrap.sh` now uploads the three first-party DARs
+  to both the app-provider and app-user participants, because the receiver's participant is
+  an informee of every lock transaction and Canton rejects at confirmation if the informee
+  participant cannot resolve the package; uploading only to app-provider left every
+  cross-participant lock failing at confirmation.
 
 ## [0.1.0] - 2026-09-22
 

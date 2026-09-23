@@ -28,6 +28,7 @@ is a pull request, a commit, a demo recording, a blog post, or a generated evide
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-22 | Long Run Advisory (this repository) | Escrowed DvP with a dispute window: the `settle` path enacted jointly by both counterparties before the deadline, and the arbiter's `award` path after it, from one set of `LockTerms` — two conditions, two outcomes, one pool of funds. Run under wall-clock time, not the static time the rest of the proof suite uses. | LocalNet (isolated Canton 3.5.17 sandbox, the Testnet runtime) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-reference-evidence.json](runbook/localnet-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
 | 2026-09-22 | Long Run Advisory (this repository) | The same escrowed DvP with a dispute window, run again on the Splice LocalNet stack at the release Canton Mainnet is running: a real participant behind a real synchronizer, with the Ledger API's authentication on, rather than an in-process sandbox. The `settle` path enacted 43 seconds before the deadline and the arbiter's `award` path 14 seconds after it. | LocalNet (Splice 0.8.0 / Canton 3.5.16, the Mainnet configuration) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-mainnet-0.8.0-reference-evidence.json](runbook/localnet-mainnet-0.8.0-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
+| 2026-09-22 | Long Run Advisory (this repository) | CIP-0112 DvP between registries, against **real Canton Coin**. The seller's TestTokenV2 holding is locked under the conditional lock as the delivery leg; the buyer pays real Amulet as the payment leg, allocated on both sides through the token standard and settled through Splice's own `ExternalPartyAmuletRules` settlement factory. One submission, two commands, one update: `SettlementFactory_SettleBatch` and `ConditionalLock_Enact` are the two root nodes of the same transaction. The buyer is hosted on a second participant. A second lock proves the expiry path under wall-clock time. | LocalNet (Splice 0.8.0 / Canton 3.5.16, the Mainnet configuration; two participants) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-mainnet-0.8.0-dvp-evidence.json](runbook/localnet-mainnet-0.8.0-dvp-evidence.json) — settlement update `122078bb74abb13cd3333d536d1f039d549c5da2f8a22077ca2be3daae9e26a83f7c`, expiry update `1220aa7117cf7fbc7d97511612403074f9143837af12287eacf15dbdef999c32c051` |
 | — | — | *pending a participant* | DevNet | — | — | — |
 
 The exact git commit, DAR digests, and enactment timestamps for any reference-deployment row are in the linked evidence file, not transcribed into the table; the evidence file also records the deadline and the time each path was enacted, which lets a reader confirm the settle path ran before the deadline and the arbiter's award path after it, under wall-clock time. The interface package ID is the one value the table does carry, for the reason given above.
@@ -46,23 +47,32 @@ The `v0.1.0` tag does not exist yet; use that form once the release is tagged. N
 ## What you do not need
 
 **No Canton Coin, and no network funds, for the assets being locked.** The reference deployment
-locks holdings issued by a `TestTokenV2` registry, which mints its own. This is a material lowering
-of the barrier: "run an escrowed trade on DevNet" sounds like it needs funding, and it does not.
+and the DvP integration test both lock holdings issued by a `TestTokenV2` registry, which mints
+its own. This is a material lowering of the barrier: "run an escrowed trade" sounds like it needs
+funding, and the locked asset does not. The DvP test does settle a real Amulet payment leg
+atomically against the locked TestTokenV2 delivery leg in a single transaction, but Amulet is
+the counter-asset for settlement, not the thing being conditionally locked. That distinction
+matters: the locked asset (TestTokenV2) follows the non-Amulet registry track, while settlement
+with Amulet is a choice of payment method.
 
 This is also a boundary worth stating precisely, because blurring it would misrepresent the work.
-These packages target **non-Amulet registries**. Canton Coin follows Splice's own track, because
-Amulet changes land through Splice and the CIP process on the maintainers' schedule. Nothing in this
-log involves Amulet. Traffic and fees for submitting to a real synchronizer are a validator-level
-concern, not a per-script one.
+These packages target **non-Amulet registries** for the locked assets. Canton Coin follows Splice's
+own track, because Amulet changes land through Splice and the CIP process on the maintainers'
+schedule. The payment leg settles through Splice's own `SettlementFactory` and allocation standard.
+Traffic and fees for submitting to a real synchronizer are a validator-level concern, not a
+per-script one.
 
 ## Update IDs, and why the rows carry contract IDs instead
 
 Daml Script returns choice results, not ledger update IDs; `submit` gives no handle on the update.
-The LocalNet run therefore records the **contract IDs** the script itself returned — the lock
-contract for each path and the holdings each enactment produced — and its `update_id_source` field
-says so in as many words. A contract ID is equally citable and proves the same thing: a real Ledger
-API accepted the transaction and created the contract. Update IDs would come from the participant's
-`/v2/updates` stream and can be added to a later row without changing the schema.
+The LocalNet runs using Daml Script therefore record the **contract IDs** the script itself returned —
+the lock contract for each path and the holdings each enactment produced — and their `update_id_source`
+field says so in as many words. A contract ID is equally citable and proves the same thing: a real
+Ledger API accepted the transaction and created the contract. The DvP integration test is different:
+it drives the JSON Ledger API v2 directly with `submit-and-wait-for-transaction`, so it captures a
+real `updateId` — a single update carrying both the Amulet settlement and the lock enactment — alongside
+the contract IDs. Update IDs would come from a participant's `/v2/updates` stream and the schema
+accommodates them without change.
 
 ## What survives a network reset
 
