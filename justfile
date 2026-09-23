@@ -108,22 +108,34 @@ setup:
     ./scripts/init-submodules.sh
     ./scripts/fetch-dars.sh
 
-# Run the legacy Splice localnet script with optional arguments.
+# Start the Splice localnet at the Mainnet release, wait, and upload the DARs.
 localnet *args:
     ./scripts/localnet.sh "$@"
 
-# Stop the legacy Splice localnet.
+# Stop the localnet, keeping its volumes.
 localnet-down:
     ./scripts/localnet.sh --down
 
-# Bootstrap the legacy Splice localnet.
+# Stop the localnet and delete its volumes (a fresh ledger next start).
+localnet-clean:
+    ./scripts/localnet.sh --clean
+
+# Build the first-party DARs and upload them onto a running localnet.
 localnet-bootstrap:
     ./scripts/localnet-bootstrap.sh
 
-# Show legacy localnet container status.
+# Re-sync the vendored Splice localnet tree to the release live on Mainnet.
+localnet-sync *args:
+    ./scripts/localnet-sync.sh "$@"
+
+# Run the escrowed-DvP reference deployment on the running localnet.
+localnet-prove *args:
+    ./scripts/localnet-prove.sh "$@"
+
+# Show localnet container status.
 localnet-status:
     ./scripts/lib/localnet-compose.sh ps
 
-# Follow legacy localnet logs.
+# Follow localnet logs.
 localnet-logs:
     ./scripts/lib/localnet-compose.sh logs -f

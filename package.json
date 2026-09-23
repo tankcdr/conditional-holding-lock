@@ -24,6 +24,8 @@
     "localnet:clean": "./scripts/localnet.sh --clean",
     "localnet:bootstrap": "./scripts/localnet-bootstrap.sh",
     "localnet:status": "./scripts/lib/localnet-compose.sh ps",
-    "localnet:logs": "./scripts/lib/localnet-compose.sh logs -f"
+    "localnet:logs": "./scripts/lib/localnet-compose.sh logs -f",
+    "localnet:sync": "./scripts/localnet-sync.sh",
+    "localnet:prove": "./scripts/localnet-prove.sh"
   }
 }

@@ -18,7 +18,36 @@ package coordinates stay still.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The localnet stack is now vendored from Splice's own `cluster/compose/localnet/` at the
+  Mainnet release (Splice 0.8.0, commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`), rather
+  than a hand-copied 0.6.7-era layout. `scripts/localnet-sync.sh` re-materializes the tree
+  when Mainnet updates. `just check-compatibility` detects when the localnet drifts and fails
+  `just release` until re-synced.
+- The `localnet/` submodule is pinned but no longer used by the localnet stack itself; it
+  provides reference material (prior art for the network-version discovery pattern that
+  `scripts/localnet-sync.sh` and `scripts/check-compatibility.py` use).
+
+### Removed
+
+- The legacy hand-copied `docker-compose.localnet.yml` and `localnet-overrides/splice-0.6.7/`
+  configuration files have been deleted.
+
+### Added
+
+- `scripts/localnet-sync.sh [<tag>] [--check]` — downloads and extracts the Splice localnet
+  tree for a given release tag (or the current Mainnet version if none given); idempotent and
+  diff-checkable with `--check`.
+- `localnet-overrides/conditional-lock.compose.yaml` — the only first-party file in the
+  overrides directory, a compose layer pinning the app-provider participant's admin token
+  (`scripts/lib/localnet_token.py --admin`). Required for Daml Script to run under auth-on
+  profiles (Daml Script allocates its own parties; Canton 3.5.16 has no pre-granted
+  CanActAsAnyParty right).
+- `scripts/localnet-prove.sh` now includes a preflight check: if the participant already
+  hosted a reference deployment, Daml Script will fail on allocateParty (deterministic
+  party-id hints cause collision on rerun). The preflight instructs you to run
+  `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
 
 ## [0.1.0] - 2026-09-22
 

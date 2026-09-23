@@ -12,6 +12,10 @@
 #                  -f $LOCALNET_DIR/resource-constraints.yaml \
 #                  --profile sv --profile app-provider --profile app-user ...
 #
+# The one file that is ours is localnet-overrides/conditional-lock.compose.yaml,
+# layered last; it pins the app-provider participant's admin token. See that
+# file for why. The vendored tree itself is never edited.
+#
 # Our own settings reach compose through the process environment, not through a
 # third --env-file. That ordering matters: compose.env derives values from each
 # other (LOCALNET_ENV_DIR from LOCALNET_DIR, PARTY_HINT from DOCKER_NETWORK),
@@ -84,6 +88,7 @@ localnet_compose() {
     --env-file "$LOCALNET_DIR/env/common.env" \
     -f "$LOCALNET_DIR/compose.yaml" \
     -f "$LOCALNET_DIR/resource-constraints.yaml" \
+    -f "$_ROOT/localnet-overrides/conditional-lock.compose.yaml" \
     --profile sv \
     --profile app-provider \
     --profile app-user \

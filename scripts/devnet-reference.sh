@@ -182,6 +182,14 @@ if $external_participant && [[ -n "${LEDGER_TOKEN:-}" ]]; then
   printf '%s' "$LEDGER_TOKEN" > "$token_file"
   printf 'Authorization: Bearer %s' "$LEDGER_TOKEN" > "$header_file"
   token_args=(--access-token-file "$token_file")
+  # A participant admin token carries no user-id claim, so Canton cannot
+  # default the submission's user_id from it and rejects every submit with
+  # INVALID_TOKEN "Cannot default user_id field". LEDGER_USER_ID names the
+  # ledger user to submit as; it is a user id, not a credential, so unlike the
+  # token it is fine in argv.
+  if [[ -n "${LEDGER_USER_ID:-}" ]]; then
+    token_args+=(--user-id "$LEDGER_USER_ID")
+  fi
   auth_header=(-H "@${header_file}")
 fi
 
