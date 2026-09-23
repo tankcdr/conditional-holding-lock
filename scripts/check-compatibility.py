@@ -17,6 +17,30 @@ def fetch(url):
     return subprocess.check_output(["curl", "-fsSL", "--retry", "2", "--connect-timeout", "15", "--max-time", "60", url])
 
 
+def tree_sha256(root):
+    """Stable digest of a vendored tree's contents, offline and without git.
+
+    Hashes the sorted relative paths, an executable-bit flag, and the bytes
+    of every file under `root`, excluding SOURCE.json itself. Shared by
+    scripts/localnet-sync.sh (which records it in SOURCE.json when it
+    materializes a tree, via `python3 check-compatibility.py --tree-digest`)
+    and localnet_row() below (which recomputes it to detect hand-edits), so
+    the digest logic lives in exactly one place.
+    """
+    root = Path(root)
+    digest = hashlib.sha256()
+    paths = sorted(p for p in root.rglob("*") if p.is_file())
+    for p in paths:
+        rel = p.relative_to(root).as_posix()
+        if rel == "SOURCE.json":
+            continue
+        executable = 1 if (p.stat().st_mode & 0o111) else 0
+        digest.update(rel.encode("utf-8"))
+        digest.update(bytes([executable]))
+        digest.update(p.read_bytes())
+    return digest.hexdigest()
+
+
 def localnet_row(mainnet_splice, drift):
     """Compare the vendored localnet stack's Splice tag with live Mainnet.
 
@@ -49,6 +73,19 @@ def localnet_row(mainnet_splice, drift):
                 f"localnet: {source_path.relative_to(ROOT)} records tag {source.get('tag')}, "
                 f"but .env.localnet.example pins IMAGE_TAG {tag}"
             )
+        recorded_digest = source.get("tree_sha256")
+        if not recorded_digest:
+            drift.append(
+                f"localnet: {source_path.relative_to(ROOT)} has no tree_sha256; "
+                f"run scripts/localnet-sync.sh to record it"
+            )
+        else:
+            actual_digest = tree_sha256(overrides)
+            if actual_digest != recorded_digest:
+                drift.append(
+                    f"localnet: {row['overrides_dir']} has been modified since it was synced "
+                    f"(tree digest mismatch); it must match Splice tag {tag} verbatim"
+                )
 
     if mainnet_splice and tag != mainnet_splice:
         drift.append(f"localnet.splice: expected {tag}, live {mainnet_splice}")
@@ -103,4 +140,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--tree-digest":
+        print(tree_sha256(sys.argv[2]))
+        raise SystemExit(0)
     raise SystemExit(main())
