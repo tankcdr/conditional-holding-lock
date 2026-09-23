@@ -18,33 +18,30 @@ package coordinates stay still.
 
 ## [Unreleased]
 
-### Fixed
+Nothing yet.
 
-- The DvP evidence recorder now requires the expiry path to return the holding to the seller (the run file's claimed owner, the expire update's own event, `parties.alice`, and the delivery leg's sender must agree) and records the ledger's rejection text as observed, with its HTTP status line, instead of a constant. `scripts/tests/dvp-evidence-tamper.sh` corrupts each of those fields in a copy of the last run and requires the recorder to reject it; `just test-integration-evidence` runs it.
-- `scripts/localnet-sync.sh` repins an existing `.env.localnet` alongside the example. A `.env.localnet` from before the Splice compose stack (no `IMAGE_TAG` line) cannot be repaired by substitution, so the sync refuses it and the compose driver says to delete it; it is recreated from the example on the next run. The tamper test also corrupts the raw expire update together with the claim, so only the seller comparison can catch it.
+## [0.1.0] - 2026-09-23
 
-### Changed
-- The escrowed-DvP reference deployment and 57 of the 70 Daml Script tests now run against a
-  Docker localnet at the Mainnet release, not only against in-process sandboxes. The 13 that
-  do not are the ones needing a controllable clock; the localnet participant reports
-  `staticTime.supported: false`.
-
-- The localnet stack is now vendored from Splice's own `cluster/compose/localnet/` at the
-  Mainnet release (Splice 0.8.0, commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`), rather
-  than a hand-copied 0.6.7-era layout. `scripts/localnet-sync.sh` re-materializes the tree
-  when Mainnet updates. `just check-compatibility` detects when the localnet drifts and fails
-  `just release` until re-synced.
-- The `localnet/` submodule is pinned but no longer used by the localnet stack itself; it
-  provides reference material (prior art for the network-version discovery pattern that
-  `scripts/localnet-sync.sh` and `scripts/check-compatibility.py` use).
-
-### Removed
-
-- The legacy hand-copied `docker-compose.localnet.yml` and `localnet-overrides/splice-0.6.7/`
-  configuration files have been deleted.
 
 ### Added
 
+- `splice-api-token-conditional-lock-v1` — the three CIP interfaces and data types.
+- `conditional-lock-utils` — reference guard evaluator, terms validator, and outcome resolver,
+  adoptable without the TestTokenV2 adapter.
+- `conditional-lock-test-token` — TestTokenV2 adapter with V1/V2 holding views and V2 events.
+- `conditional-lock-test` — the 70-script proof suite.
+- Release tooling: `scripts/check-pin.py`, `scripts/verify-reproducible.sh`,
+  `scripts/make-release-manifest.py`, and the shared `scripts/lib/dar_identity.py`, which is now
+  the single implementation of the DAR `Main-Dalf:` parse outside `scripts/fetch-dars.py`.
+- Reference deployment scripts: `scripts/deploy-dars.sh` (the single JSON Ledger API /v2/packages
+  upload path, now also used by `scripts/quickstart-check.sh`), `scripts/devnet-reference.sh`,
+  `scripts/record-reference-proof.py`, and `scripts/devnet-status.sh`.
+- `examples/devnet-escrow/` — the escrowed-DvP-with-dispute-window script the reference deployment runs.
+- `docs/adoption-evidence.md` — adoption evidence log and reference-deployment record.
+- Just recipes `check-pin`, `verify-reproducible`, `release <version>`, and
+  `release-dry-run <version>` (pass the version after `--`, as in `npm run release -- 0.1.0`),
+  and `devnet-deploy`, `devnet-reference`, and `devnet-status`, all mirrored as npm scripts.
+- This `CHANGELOG.md` and the release notes under `docs/release-notes/`.
 - `scripts/localnet-sync.sh [<tag>] [--check]` — downloads and extracts the Splice localnet
   tree for a given release tag (or the current Mainnet version if none given); idempotent and
   diff-checkable with `--check`.
@@ -72,31 +69,30 @@ package coordinates stay still.
   participant cannot resolve the package; uploading only to app-provider left every
   cross-participant lock failing at confirmation.
 
-## [0.1.0] - 2026-09-22
+### Changed
 
-Initial out-of-tree release. The interface is a strawman for the Conditional Holding Lock CIP and
-will change while the interface issues are open, so expect to re-pin. A package ID is a content
-hash; every interface edit invalidates every adopter's pin, and there is no in-place amendment.
+- The escrowed-DvP reference deployment and 57 of the 70 Daml Script tests now run against a
+  Docker localnet at the Mainnet release, not only against in-process sandboxes. The 13 that
+  do not are the ones needing a controllable clock; the localnet participant reports
+  `staticTime.supported: false`.
+- The localnet stack is now vendored from Splice's own `cluster/compose/localnet/` at the
+  Mainnet release (Splice 0.8.0, commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`), rather
+  than a hand-copied 0.6.7-era layout. `scripts/localnet-sync.sh` re-materializes the tree
+  when Mainnet updates. `just check-compatibility` detects when the localnet drifts and fails
+  `just release` until re-synced.
+- The `localnet/` submodule is pinned but no longer used by the localnet stack itself; it
+  provides reference material (prior art for the network-version discovery pattern that
+  `scripts/localnet-sync.sh` and `scripts/check-compatibility.py` use).
 
-### Added
+### Removed
 
-- `splice-api-token-conditional-lock-v1` — the three CIP interfaces and data types.
-- `conditional-lock-utils` — reference guard evaluator, terms validator, and outcome resolver,
-  adoptable without the TestTokenV2 adapter.
-- `conditional-lock-test-token` — TestTokenV2 adapter with V1/V2 holding views and V2 events.
-- `conditional-lock-test` — the 70-script proof suite.
-- Release tooling: `scripts/check-pin.py`, `scripts/verify-reproducible.sh`,
-  `scripts/make-release-manifest.py`, and the shared `scripts/lib/dar_identity.py`, which is now
-  the single implementation of the DAR `Main-Dalf:` parse outside `scripts/fetch-dars.py`.
-- Reference deployment scripts: `scripts/deploy-dars.sh` (the single JSON Ledger API /v2/packages
-  upload path, now also used by `scripts/quickstart-check.sh`), `scripts/devnet-reference.sh`,
-  `scripts/record-reference-proof.py`, and `scripts/devnet-status.sh`.
-- `examples/devnet-escrow/` — the escrowed-DvP-with-dispute-window script the reference deployment runs.
-- `docs/adoption-evidence.md` — adoption evidence log and reference-deployment record.
-- Just recipes `check-pin`, `verify-reproducible`, `release <version>`, and
-  `release-dry-run <version>` (pass the version after `--`, as in `npm run release -- 0.1.0`),
-  and `devnet-deploy`, `devnet-reference`, and `devnet-status`, all mirrored as npm scripts.
-- This `CHANGELOG.md` and the release notes under `docs/release-notes/`.
+- The legacy hand-copied `docker-compose.localnet.yml` and `localnet-overrides/splice-0.6.7/`
+  configuration files have been deleted.
+
+### Fixed
+
+- The DvP evidence recorder now requires the expiry path to return the holding to the seller (the run file's claimed owner, the expire update's own event, `parties.alice`, and the delivery leg's sender must agree) and records the ledger's rejection text as observed, with its HTTP status line, instead of a constant. `scripts/tests/dvp-evidence-tamper.sh` corrupts each of those fields in a copy of the last run and requires the recorder to reject it; `just test-integration-evidence` runs it.
+- `scripts/localnet-sync.sh` repins an existing `.env.localnet` alongside the example. A `.env.localnet` from before the Splice compose stack (no `IMAGE_TAG` line) cannot be repaired by substitution, so the sync refuses it and the compose driver says to delete it; it is recreated from the example on the next run. The tamper test also corrupts the raw expire update together with the claim, so only the seller comparison can catch it.
 
 ### Build and dependency notes
 
@@ -127,15 +123,12 @@ Daml SDK 3.5.2, Daml-LF 2.1, Splice release 0.8.1 (commit `fb3c8c8a`), built wit
 | `conditional-lock-utils` | `02e296d5a8317990106aebc51db5b20e0f1391646e03d0d23d18b25e5b10e5d3` | yes | new |
 | `conditional-lock-test-token` | `245c8e38d10ca6e3c74cd9b3a3ef770cdecf616cee5d096b405fe4d712e6844f` | yes | new |
 | `conditional-lock-test` | `7a9bb8ba33e2a01eb233e2eec929e406b39f557be491a2f8816f231798f1ce65` | no | new |
-
 A DAR's SHA-256 is download integrity; the package ID is package identity. Neither implies the
 other — the same package can ship as two DAR files with different digests, which is exactly what
 `splice-token-standard-utils-2.0.0` does across Splice 0.7.4 and 0.8.1.
-
 `conditional-lock-test` is not attached to the release: it is the proof suite, it depends on
 `daml-script`, and no consumer should put it in `data-dependencies`. It is recorded in the manifest
 with `"attached": false` for the record.
-
 `dpm publish` is out of scope for this release; GitHub Releases are the citable artifact channel.
 DAR signing is out of scope for this release — the SHA-256 values in the generated
 `conditional-lock-release.json` manifest are the only provenance.
