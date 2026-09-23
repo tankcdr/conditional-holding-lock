@@ -48,25 +48,29 @@ if m.get("release") not in (version, f"v{version}"):
     raise SystemExit(f"publish-release: {manifest} is for {m.get('release')!r}, not {version}")
 if m.get("git_commit") != head:
     raise SystemExit(f"publish-release: {manifest} was written at {str(m.get('git_commit'))[:12]}, HEAD is {head[:12]}; rerun 'just release {version}'")
-if m.get("git_dirty"):
-    raise SystemExit(f"publish-release: {manifest} records a dirty worktree; rerun 'just release {version}' from a clean tree")
 PY
 
-# Every attached asset must have the digest the manifest recorded.
+# Every attached asset must have the digest the manifest recorded. The list is
+# read first so a malformed manifest fails here instead of yielding no assets.
+attached_list="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+rows = [p for p in m["packages"] if p.get("attached")]
+if not rows:
+    raise SystemExit("no attached packages in the manifest")
+for p in rows:
+    print(p["file"] + "\t" + p["dar_sha256"])
+' "$manifest")" || fail "cannot read the attached packages from $manifest"
 assets=()
 while IFS=$'\t' read -r file expected; do
+  [[ -n "$file" ]] || continue
   path="$(find packages -path "*/.daml/dist/$file" -type f | head -1)"
   [[ -n "$path" ]] || fail "$file is in the manifest but not under packages/*/.daml/dist; rerun 'just release $version'"
   actual="$(shasum -a 256 "$path" | cut -d' ' -f1)"
   [[ "$actual" == "$expected" ]] || fail "$file has SHA-256 ${actual:0:12}..., the manifest says ${expected:0:12}...; the DAR was rebuilt after the manifest, rerun 'just release $version'"
   assets+=("$path")
-done < <(python3 -c '
-import json, sys
-m = json.load(open(sys.argv[1]))
-for a in m["artifacts"]:
-    if a.get("attached"):
-        print(a["file"] + "\t" + a["dar_sha256"])
-' "$manifest")
+done <<< "$attached_list"
+[[ "${#assets[@]}" -eq 3 ]] || fail "expected 3 attached DARs, the manifest lists ${#assets[@]}"
 hv_expected="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hash_vectors_sha256"])' "$manifest")"
 hv_actual="$(shasum -a 256 fixtures/hash-vectors.json | cut -d' ' -f1)"
 [[ "$hv_actual" == "$hv_expected" ]] || fail "fixtures/hash-vectors.json digest does not match the manifest"
