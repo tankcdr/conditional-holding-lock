@@ -334,7 +334,52 @@ def dvp_find_created(tx, cid, label, update_path):
     raise SystemExit(f"{update_path}: no CreatedEvent for {label} = {cid!r} in transaction.events")
 
 
-def dvp_root_events(tx):
+def dvp_check_packages_pinned(tx, update_path, packages_observed):
+    """For every event in tx whose packageName is one of the required packages, the
+    package-id prefix of its templateId must equal packages_observed[packageName].
+    This is what makes packages_observed a claim about the packages actually used on
+    ledger, rather than an unpinned string the harness chose."""
+    for kind, payload in dvp_events(tx):
+        package_name = payload.get("packageName")
+        if package_name not in packages_observed:
+            continue
+        template_id = payload.get("templateId") or ""
+        template_package_id = template_id.split(":", 1)[0] if ":" in template_id else None
+        if not template_package_id:
+            raise SystemExit(
+                f"{update_path}: a {kind} with packageName = {package_name!r} has no well-formed "
+                f"templateId ({template_id!r}); cannot verify its package id"
+            )
+        if template_package_id != packages_observed[package_name]:
+            raise SystemExit(
+                f"{update_path}: a {kind}'s templateId = {template_id!r} has package id "
+                f"{template_package_id!r}, which does not equal packages_observed[{package_name!r}] "
+                f"= {packages_observed[package_name]!r}; a packages_observed entry that does not "
+                f"match the package id actually used on ledger is fabricated"
+            )
+
+
+def dvp_transfer_leg_side_owner(tx, leg_id, side, update_path):
+    """The owner of the EventLog_HoldingsChange whose transferLegSides names leg_id on
+    the given side ('SenderSide' or 'ReceiverSide'). This is how the raw settlement
+    update records who is actually on each side of a leg, independent of what the
+    harness claims."""
+    for kind, payload in dvp_events(tx):
+        if kind != "ExercisedEvent" or payload.get("choice") != "EventLog_HoldingsChange":
+            continue
+        choice_argument = payload.get("choiceArgument") or {}
+        for item in choice_argument.get("transferLegSides") or []:
+            if item.get("transferLegId") == leg_id and item.get("side") == side:
+                owner = (choice_argument.get("account") or {}).get("owner")
+                if owner:
+                    return owner
+    raise SystemExit(
+        f"{update_path}: no EventLog_HoldingsChange has a transferLegSides entry for "
+        f"transferLegId = {leg_id!r} on side {side!r}; cannot cross-check this leg's parties"
+    )
+
+
+def dvp_root_events(tx, update_path):
     """A node is a root when no other node's [nodeId, lastDescendantNodeId] span
     strictly contains it. ExercisedEvents carry their own span; CreatedEvents
     have no descendants, so their span is just themselves."""
@@ -342,6 +387,11 @@ def dvp_root_events(tx):
     for kind, payload in dvp_events(tx):
         node_id = payload.get("nodeId")
         last_id = payload.get("lastDescendantNodeId", node_id) if kind == "ExercisedEvent" else node_id
+        if not isinstance(node_id, int) or not isinstance(last_id, int):
+            raise SystemExit(
+                f"{update_path}: a {kind} has nodeId = {node_id!r} and/or lastDescendantNodeId = "
+                f"{last_id!r} that is not an integer; cannot determine root nodes by containment"
+            )
         nodes.append((node_id, last_id, kind, payload))
     roots = []
     for node_id, last_id, kind, payload in nodes:
@@ -555,6 +605,27 @@ def record_dvp(args):
         )
     parse_timestamp(effective_at, "settlement.effective_at", dvp_run_path)
 
+    # Gate 15b: the expiry timeline is bounded by the expiry update's own effectiveAt,
+    # not just by the deadline below. Without this, expiry.expires_at and
+    # expiry.enact_rejected_at could be set to any date after the deadline, including
+    # one long after the transaction that supposedly recorded them.
+    expire_tx_effective_at = expire_tx.get("effectiveAt")
+    expire_tx_effective_ts = parse_timestamp(
+        expire_tx_effective_at, "expire_tx.effectiveAt", expire_update_path
+    )
+    if not (expires_at_ts <= expire_tx_effective_ts):
+        raise SystemExit(
+            f"{dvp_run_path}: expiry.expires_at = {expiry.get('expires_at')!r} is after "
+            f"{expire_update_path}'s transaction.effectiveAt = {expire_tx_effective_at!r}; the lock "
+            f"cannot be expired before it expires"
+        )
+    if not (enact_rejected_ts <= expire_tx_effective_ts):
+        raise SystemExit(
+            f"{dvp_run_path}: expiry.enact_rejected_at = {expiry.get('enact_rejected_at')!r} is after "
+            f"{expire_update_path}'s transaction.effectiveAt = {expire_tx_effective_at!r}; the rejection "
+            f"cannot have happened after the transaction that recorded the expiry"
+        )
+
     # Gate 16: synchronizer_id matches both raw updates' own synchronizer.
     synchronizer_id = result.get("synchronizer_id")
     settlement_sync_id = settlement_tx.get("synchronizerId")
@@ -572,7 +643,7 @@ def record_dvp(args):
 
     # Gate 17: exactly two root nodes in the settlement update, and command_count is
     # derived from them rather than asserted about itself.
-    settlement_roots = dvp_root_events(settlement_tx)
+    settlement_roots = dvp_root_events(settlement_tx, settlement_update_path)
     if len(settlement_roots) != 2:
         raise SystemExit(
             f"{settlement_update_path}: found {len(settlement_roots)} root node(s) in "
@@ -600,6 +671,83 @@ def record_dvp(args):
     settle_batch_root = next(
         payload for _, payload in settlement_roots if payload.get("choice") == "SettlementFactory_SettleBatch"
     )
+
+    # Gate 17a: the recorded allocation contract ids are the ones the settle-batch
+    # actually finalized. Without this they are shape-checked only, so a run could
+    # claim any pair of well-formed contract ids as "the Amulet allocations".
+    settled_allocation_cids = [
+        (a or {}).get("allocationCid")
+        for a in (settle_batch_root.get("choiceArgument") or {}).get("allocations") or []
+    ]
+    if sorted(amulet_allocation_cids) != sorted(c for c in settled_allocation_cids if c):
+        raise SystemExit(
+            f"{dvp_run_path}: settlement.amulet_allocation_cids = {sorted(amulet_allocation_cids)!r} "
+            f"are not the allocations the settle-batch finalized, which "
+            f"{settlement_update_path} records as "
+            f"{sorted(c for c in settled_allocation_cids if c)!r}"
+        )
+    if len(amulet_allocation_cids) < 2:
+        raise SystemExit(
+            f"{dvp_run_path}: settlement.amulet_allocation_cids has "
+            f"{len(amulet_allocation_cids)} entries, expected at least 2; the payment leg needs "
+            f"both a sender-side and a receiver-side allocation, and a batch with fewer is not "
+            f"the DvP this evidence describes"
+        )
+
+    # Gate 17b: packages_observed is pinned against the package id every raw event of
+    # that package actually carries, not intersected only against the DARs this
+    # repository built (see Gate 25 below, which is a separate, narrower check against
+    # first-party packages only). This is what makes "real Canton Coin" a claim about
+    # the package id on ledger, not a string the harness chose.
+    dvp_check_packages_pinned(settlement_tx, settlement_update_path, packages_observed)
+    dvp_check_packages_pinned(expire_tx, expire_update_path, packages_observed)
+    settle_batch_package_name = settle_batch_root.get("packageName")
+    if settle_batch_package_name != "splice-amulet":
+        raise SystemExit(
+            f"{settlement_update_path}: the SettlementFactory_SettleBatch root has packageName = "
+            f"{settle_batch_package_name!r}, expected 'splice-amulet'; the payment leg must be the "
+            f"localnet's real Amulet package, identified by package id and not by a string the "
+            f"harness chose"
+        )
+    settle_batch_template_id = settle_batch_root.get("templateId") or ""
+    settle_batch_template_package_id = (
+        settle_batch_template_id.split(":", 1)[0] if ":" in settle_batch_template_id else None
+    )
+    if settle_batch_template_package_id != packages_observed.get("splice-amulet"):
+        raise SystemExit(
+            f"{settlement_update_path}: the SettlementFactory_SettleBatch root's templateId = "
+            f"{settle_batch_template_id!r} has package id {settle_batch_template_package_id!r}, "
+            f"which does not equal packages_observed['splice-amulet'] = "
+            f"{packages_observed.get('splice-amulet')!r}; the payment leg must be the localnet's "
+            f"real Amulet package, identified by package id and not by a string the harness chose"
+        )
+
+    # Gate 17c: settlement.lock_id and settlement.transfer_leg_ids are cross-checked
+    # against the settle-batch root's own echoed settlement id and the transferLegIds
+    # actually present in the raw settlement update, not just against each other.
+    settle_batch_settlement_id = ((settle_batch_root.get("choiceArgument") or {}).get("settlement") or {}).get("id")
+    if lock_id != settle_batch_settlement_id:
+        raise SystemExit(
+            f"{dvp_run_path}: settlement.lock_id = {lock_id!r} does not equal the settle-batch "
+            f"root's choiceArgument.settlement.id = {settle_batch_settlement_id!r}"
+        )
+    raw_transfer_leg_ids = set()
+    for leg in (settle_batch_root.get("choiceArgument") or {}).get("transferLegs") or []:
+        if leg.get("transferLegId"):
+            raw_transfer_leg_ids.add(leg["transferLegId"])
+    for kind, payload in dvp_events(settlement_tx):
+        if kind == "ExercisedEvent" and payload.get("choice") == "EventLog_HoldingsChange":
+            for side in (payload.get("choiceArgument") or {}).get("transferLegSides") or []:
+                if side.get("transferLegId"):
+                    raw_transfer_leg_ids.add(side["transferLegId"])
+    for i, leg_id in enumerate(transfer_leg_ids):
+        if leg_id not in raw_transfer_leg_ids:
+            raise SystemExit(
+                f"{dvp_run_path}: settlement.transfer_leg_ids[{i}] = {leg_id!r} does not appear as a "
+                f"transferLegId in {settlement_update_path}'s SettlementFactory_SettleBatch "
+                f"transferLegs or any EventLog_HoldingsChange transferLegSides; a claimed leg id not "
+                f"present in the participant's own recorded response is fabricated"
+            )
 
     # Gate 18: every claimed choice actually appears in the settlement update's own events.
     all_choices_in_update = {
@@ -642,6 +790,13 @@ def record_dvp(args):
             f"{delivery_holding.get('amount')!r} does not equal settlement.delivery.amount = "
             f"{delivery.get('amount')!r}"
         )
+    delivery_instrument_id = (delivery_holding.get("instrumentId") or {}).get("id")
+    if delivery_instrument_id != delivery.get("instrument_id"):
+        raise SystemExit(
+            f"{settlement_update_path}: delivery CreatedEvent's holding.instrumentId.id = "
+            f"{delivery_instrument_id!r} does not equal settlement.delivery.instrument_id = "
+            f"{delivery.get('instrument_id')!r}"
+        )
 
     payment_cid = payment.get("holding_contract_id")
     payment_created = dvp_find_created(
@@ -665,6 +820,51 @@ def record_dvp(args):
             f"{payment_amount_onledger!r} does not equal settlement.payment.amount = "
             f"{payment.get('amount')!r}"
         )
+
+    # Gate 19b: parties, lock_contract_id, and executor are cross-checked against the
+    # raw settlement update, not copied verbatim. delivery's leg id (the sole entry of
+    # transfer_leg_ids, format <lockId>/<ruleId>/<legId>) names alice as its
+    # SenderSide (the authorizer who gives up the delivery) and bob as its
+    # ReceiverSide, independent of settlement.delivery.receiver above.
+    delivery_leg_id = transfer_leg_ids[0]
+    delivery_authorizer = dvp_transfer_leg_side_owner(
+        settlement_tx, delivery_leg_id, "SenderSide", settlement_update_path
+    )
+    delivery_receiver_side = dvp_transfer_leg_side_owner(
+        settlement_tx, delivery_leg_id, "ReceiverSide", settlement_update_path
+    )
+    parties = result.get("parties") or {}
+    if parties.get("alice") != payment.get("receiver") or parties.get("alice") != delivery_authorizer:
+        raise SystemExit(
+            f"{dvp_run_path}: parties.alice = {parties.get('alice')!r} does not equal both "
+            f"settlement.payment.receiver = {payment.get('receiver')!r} and the delivery leg's "
+            f"SenderSide (authorizer) owner in {settlement_update_path} = {delivery_authorizer!r}"
+        )
+    if parties.get("bob") != payment.get("sender") or parties.get("bob") != delivery_receiver_side:
+        raise SystemExit(
+            f"{dvp_run_path}: parties.bob = {parties.get('bob')!r} does not equal both "
+            f"settlement.payment.sender = {payment.get('sender')!r} and the delivery leg's "
+            f"ReceiverSide owner in {settlement_update_path} = {delivery_receiver_side!r}"
+        )
+    settle_batch_actors = (settle_batch_root.get("choiceArgument") or {}).get("actors") or []
+    if parties.get("executor") not in settle_batch_actors:
+        raise SystemExit(
+            f"{dvp_run_path}: parties.executor = {parties.get('executor')!r} does not appear in the "
+            f"settle-batch root's choiceArgument.actors = {settle_batch_actors!r}"
+        )
+    lock_contract_id = settlement.get("lock_contract_id")
+    enact_root = next(
+        payload for _, payload in settlement_roots if payload.get("choice") == "ConditionalLock_Enact"
+    )
+    if lock_contract_id != enact_root.get("contractId"):
+        raise SystemExit(
+            f"{dvp_run_path}: settlement.lock_contract_id = {lock_contract_id!r} does not equal the "
+            f"ConditionalLock_Enact root's contractId = {enact_root.get('contractId')!r} in "
+            f"{settlement_update_path}"
+        )
+    # canton_version_observed has no independent source in these artifacts to cross-check
+    # against: the raw /v2/updates responses do not carry a Canton version field, so
+    # unlike the fields above it is only format-checked (Gate 0 above), not cross-checked.
 
     # Gate 20: delivery and payment do not go to the same party.
     if delivery.get("receiver") == payment.get("receiver"):
@@ -701,6 +901,31 @@ def record_dvp(args):
             f"{dvp_run_path}: settlement.payment.receiver = {payment.get('receiver')!r} does not "
             f"equal the settle-batch root's choiceArgument.transferLegs[0].receiver.owner = "
             f"{leg_receiver_owner!r}"
+        )
+
+    # Gate 21b: the payment leg's own recorded amount and instrument, not just its
+    # sender/receiver, match what is claimed. Without this a claimed amount can differ
+    # from the amount the settle-batch root itself carries.
+    leg_amount = settle_leg.get("amount")
+    if leg_amount != payment.get("amount"):
+        raise SystemExit(
+            f"{dvp_run_path}: settlement.payment.amount = {payment.get('amount')!r} does not equal "
+            f"the settle-batch root's choiceArgument.transferLegs[0].amount = {leg_amount!r}"
+        )
+    leg_transfer_leg_id = settle_leg.get("transferLegId")
+    if not lock_id or not leg_transfer_leg_id or not leg_transfer_leg_id.startswith(f"{lock_id}/"):
+        raise SystemExit(
+            f"{dvp_run_path}: the settle-batch root's choiceArgument.transferLegs[0].transferLegId = "
+            f"{leg_transfer_leg_id!r} does not start with settlement.lock_id ({lock_id!r}) followed "
+            f"by '/'; the payment leg id must be derived from the same lock as the rest of this "
+            f"settlement"
+        )
+    leg_instrument_id = settle_leg.get("instrumentId")
+    if leg_instrument_id != payment.get("instrument_id"):
+        raise SystemExit(
+            f"{dvp_run_path}: settlement.payment.instrument_id = {payment.get('instrument_id')!r} "
+            f"does not equal the settle-batch root's choiceArgument.transferLegs[0].instrumentId = "
+            f"{leg_instrument_id!r}"
         )
 
     # Gate 22: delivery and payment amounts parse as decimals and are strictly positive.

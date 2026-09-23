@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Long Run Advisory. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// JSON Ledger API v2 client. Ledger-effects transaction shape throughout, per
-// PROVEN-PAYLOADS.md: that shape is what carries createArgument/choiceArgument
-// and packageName on every event, which the DvP assertions read.
+// JSON Ledger API v2 client. Ledger-effects transaction shape throughout
+// (verified against /docs/openapi): that shape is what carries
+// createArgument/choiceArgument and packageName on every event, which the
+// DvP assertions read.
 
 export interface CreateCommand {
   CreateCommand: { templateId: string; createArguments: unknown };
@@ -110,16 +111,11 @@ export async function eventsByContractId(
  * claimed field against these bytes, so they must be the participant's own
  * bytes with nothing edited.
  *
- * NOTE for the coordinator: this response shape is
- * `{"update":{"Transaction":{"value":{updateId, events, ...}}}}` (verified
- * against /docs/openapi and against a live update), not the flat
- * `{"transaction": {...}}` shape scripts/record-reference-proof.py's
- * `load_update_file` reads (`.get("transaction")`). That script is owned by
- * another agent this wave; until it is updated to unwrap
- * `update.Transaction.value`, `just test-integration-evidence` fails with
- * "transaction.updateId = None does not match ...". See the task report for
- * the deprecated `/v2/updates/transaction-by-id` alternative, which already
- * returns the flat shape, if the coordinator prefers not to touch the gate.
+ * The response wraps the transaction as `update.Transaction.value` (verified
+ * against /docs/openapi and against a live update); the deprecated
+ * `/v2/updates/transaction-by-id` returns it flat under `transaction`
+ * instead. scripts/record-reference-proof.py's `load_update_file` unwraps
+ * either shape.
  */
 export async function updateByIdRaw(base: string, bearer: string, updateId: string, party: string): Promise<string> {
   const body = {

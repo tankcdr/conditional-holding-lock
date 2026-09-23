@@ -1,9 +1,13 @@
 // Copyright (c) 2026 Long Run Advisory. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The DvP scenario as composable steps, ported from scratchpad/spike.py and
-// scratchpad/spike_expiry.py (both ran against this localnet). Do not invent
-// payload shapes here; every field below traces to PROVEN-PAYLOADS.md.
+// The DvP scenario as composable steps. Do not invent payload shapes here:
+// our own choices and the transfer-leg-id format trace to
+// packages/conditional-lock-test-token/daml/ConditionalLock/TestToken.daml
+// and packages/splice-api-token-conditional-lock-v1/daml/Splice/Api/Token/ConditionalLockV1.daml;
+// the allocation and wallet payloads trace to Splice 0.8.0's
+// token-standard/splice-api-token-allocation-v2 and
+// apps/wallet/src/main/openapi/wallet-internal.yaml.
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import {
@@ -18,7 +22,7 @@ import { getSettlementFactory } from "./scan.js";
 import { token } from "./token.js";
 import { allocateV2, balance, tap, userStatus, withdrawAllocationV2, type AllocateV2Request } from "./wallet.js";
 
-// Package-name form template ids (PROVEN-PAYLOADS.md "Template identifiers").
+// Package-name form template ids, per the Daml sources named above.
 const CL = "#splice-api-token-conditional-lock-v1:Splice.Api.Token.ConditionalLockV1";
 const TT = "#splice-test-token-v2:Splice.Testing.Tokens.TestTokenV2";
 const IMPL = "#conditional-lock-test-token:ConditionalLock.TestToken";

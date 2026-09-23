@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // DvP: a TestTokenV2 delivery leg locked by conditional-lock-test-token,
-// settled atomically against a real Amulet payment leg. Ported from
-// scratchpad/spike.py (happy path) and scratchpad/spike_expiry.py (expiry
-// path), both of which ran against this localnet; see PROVEN-PAYLOADS.md for
-// every payload shape.
+// settled atomically against a real Amulet payment leg. Payload shapes trace
+// to packages/conditional-lock-test-token/daml/ConditionalLock/TestToken.daml,
+// packages/splice-api-token-conditional-lock-v1/daml/Splice/Api/Token/ConditionalLockV1.daml,
+// and Splice 0.8.0's token-standard/splice-api-token-allocation-v2 and
+// apps/wallet/src/main/openapi/wallet-internal.yaml.
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";

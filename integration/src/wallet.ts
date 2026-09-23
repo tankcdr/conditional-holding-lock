@@ -1,10 +1,14 @@
 // Copyright (c) 2026 Long Run Advisory. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Validator/wallet API client. Amulet routes settlement through allocations
-// (see PROVEN-PAYLOADS.md step 7): both the sender and the receiver must
-// allocate before SettlementFactory_SettleBatch can find every authorization
-// it needs, so both wallet-facing endpoints below are exercised by the DvP.
+// Validator/wallet API client. Request and response shapes come from Splice
+// 0.8.0's apps/wallet/src/main/openapi/wallet-internal.yaml.
+//
+// Amulet routes settlement through allocations, and both the sender and the
+// receiver must allocate: Splice's settlementFactoryV2_settleBatchDefaultImpl
+// refuses a batch whose transfer legs have any missing authorization
+// (token-standard/splice-token-standard-utils, fetchAndValidateAllocations),
+// so both wallet-facing allocation endpoints below are exercised by the DvP.
 
 async function request(method: string, url: string, bearer: string, body?: unknown) {
   const headers: Record<string, string> = { "content-type": "application/json" };

@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Bring up the Splice localnet at the Mainnet release, then upload the
-# unpublished conditional-lock DARs onto the app-provider participant.
+# unpublished conditional-lock DARs onto both the app-provider and the
+# app-user participant.
 #
 #   ./scripts/localnet.sh              # up + wait + bootstrap
 #   ./scripts/localnet.sh --no-bootstrap
@@ -48,9 +49,14 @@ fi
 localnet_env
 localnet_check_container_names
 
-# Both wait loops probe the app-provider node, the one this repository uploads
-# to and proves against. Their URLs come from scripts/lib/localnet_endpoints.py,
-# the single derivation of every localnet endpoint from LEDGER_JSON_API, so
+# Three wait loops: two probe the app-provider node (JSON Ledger API, then
+# validator) that this repository proves the reference deployment against;
+# the third probes the app-user participant's JSON Ledger API, because
+# scripts/localnet-bootstrap.sh uploads the DARs there too and
+# scripts/deploy-dars.sh has no retry of its own, so a cold app-user
+# participant would otherwise fail the bootstrap and exit this script with
+# status 1. Their URLs come from scripts/lib/localnet_endpoints.py, the
+# single derivation of every localnet endpoint from LEDGER_JSON_API, so
 # changing the port in .env.localnet cannot leave this script polling the old
 # one and the <node><suffix> port rule is written down in exactly one place.
 JSON_BASE="${LEDGER_JSON_API:?.env.localnet must set LEDGER_JSON_API}"
@@ -67,7 +73,7 @@ info "tree: ${LOCALNET_DIR}"
 localnet_compose up -d
 
 # Readiness is proven against the app-provider node, the one this repository
-# uploads to and runs the reference deployment against.
+# runs the reference deployment against.
 info "waiting for the app-provider participant JSON Ledger API at $JSON_BASE"
 for i in $(seq 1 120); do
   if curl -sf -o /dev/null "$JSON_BASE/livez" 2>/dev/null \
@@ -91,6 +97,23 @@ for i in $(seq 1 240); do
   fi
   if [ "$i" -eq 240 ]; then
     error "the validator did not become ready in time"
+    localnet_compose ps
+    exit 1
+  fi
+  sleep 5
+done
+
+# The app-user participant also needs to be serving before the bootstrap
+# uploads to it (see the comment above JSON_BASE for why).
+info "waiting for the app-user participant JSON Ledger API at $USER_JSON_API"
+for i in $(seq 1 120); do
+  if curl -sf -o /dev/null "$USER_JSON_API/livez" 2>/dev/null \
+     || curl -s -o /dev/null -w '%{http_code}' "$USER_JSON_API/v2/version" 2>/dev/null | grep -qE '^(200|401)$'; then
+    info "app-user participant is serving"
+    break
+  fi
+  if [ "$i" -eq 120 ]; then
+    error "the app-user participant did not start serving in time"
     localnet_compose ps
     exit 1
   fi

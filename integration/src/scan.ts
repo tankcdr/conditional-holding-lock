@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Long Run Advisory. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Scan's token-standard registry API needs no auth token (PROVEN-PAYLOADS.md);
-// it resolves the settlement factory contract and the disclosed contracts the
-// SettlementFactory_SettleBatch choice needs, keyed off the choice arguments
-// alone.
+// Scan's token-standard registry API needs no auth token (Splice 0.8.0's
+// token-standard/splice-api-token-allocation-v2); it resolves the settlement
+// factory contract and the disclosed contracts the SettlementFactory_SettleBatch
+// choice needs, keyed off the choice arguments alone.
 import type { DisclosedContract } from "./ledger.js";
 
 export interface SettlementFactoryResponse {
