@@ -21,7 +21,7 @@ package coordinates stay still.
 ### Fixed
 
 - The DvP evidence recorder now requires the expiry path to return the holding to the seller (the run file's claimed owner, the expire update's own event, `parties.alice`, and the delivery leg's sender must agree) and records the ledger's rejection text as observed, with its HTTP status line, instead of a constant. `scripts/tests/dvp-evidence-tamper.sh` corrupts each of those fields in a copy of the last run and requires the recorder to reject it; `just test-integration-evidence` runs it.
-- `scripts/localnet-sync.sh` repairs an existing `.env.localnet` in place, not only the example, and the compose driver says so when it finds one without `IMAGE_TAG`.
+- `scripts/localnet-sync.sh` repins an existing `.env.localnet` alongside the example. A `.env.localnet` from before the Splice compose stack (no `IMAGE_TAG` line) cannot be repaired by substitution, so the sync refuses it and the compose driver says to delete it; it is recreated from the example on the next run. The tamper test also corrupts the raw expire update together with the claim, so only the seller comparison can catch it.
 
 ### Changed
 - The escrowed-DvP reference deployment and 57 of the 70 Daml Script tests now run against a

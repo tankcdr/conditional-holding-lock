@@ -89,6 +89,14 @@ rewrite_env_file() {
     echo "localnet-sync: warning: $file not found, cannot repin IMAGE_TAG/LOCALNET_DIR" >&2
     return
   fi
+  # A gitignored .env.localnet from before the Splice compose stack has no
+  # IMAGE_TAG line and an unrelated LOCALNET_DIR; substituting lines cannot
+  # repair it, so say the one thing that works and stop.
+  if [[ "$(basename "$file")" == ".env.localnet" ]] && ! grep -qE '^IMAGE_TAG=' "$file"; then
+    echo "localnet-sync: $file has no IMAGE_TAG line and predates the Splice compose stack." >&2
+    echo "localnet-sync: delete it and rerun ./scripts/localnet.sh; it is recreated from .env.localnet.example." >&2
+    exit 1
+  fi
   local before after
   before="$(cat "$file")"
   if grep -qE '^IMAGE_TAG=' "$file"; then

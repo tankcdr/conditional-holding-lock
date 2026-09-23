@@ -22,6 +22,9 @@ mutations=(
   'returned owner is the delivery receiver|d["expiry"]["returned_owner"] = d["settlement"]["delivery"]["receiver"]'
   'rejection text is the bare constant|d["expiry"]["enact_rejection"] = "no alternative is satisfied"'
   'rejection text lacks the guard phrase|d["expiry"]["enact_rejection"] = "POST http://x/v2/commands/submit-and-wait-for-transaction -> 400\nsomething else"'
+  # Claim and raw update agree on a third party: only the seller comparison
+  # (parties.alice and the delivery leg's SenderSide owner) can catch this.
+  'claim and expire update both name a third party|d["expiry"]["returned_owner"] = THIRD; set_update_owner(run_dir / "expire-update.json", d["expiry"]["returned_contract_id"], THIRD)'
 )
 
 failures=0
@@ -30,7 +33,32 @@ for entry in "${mutations[@]}"; do
   rm -rf "$tmp/run"; cp -R "$RUN_DIR" "$tmp/run"
   python3 - "$tmp/run/dvp-run.json" "$expr" <<'PY'
 import json, sys
+from pathlib import Path
 path, expr = sys.argv[1], sys.argv[2]
+run_dir = Path(path).parent
+THIRD = "third-party::1220" + "ab" * 32
+
+def set_update_owner(update_path, cid, owner):
+    """Rewrite the owner of the CreatedEvent for `cid` inside a raw update file,
+    wherever the event sits in the response body."""
+    doc = json.load(open(update_path))
+    hits = 0
+    def walk(node):
+        nonlocal hits
+        if isinstance(node, dict):
+            if node.get("contractId") == cid and isinstance(node.get("createArgument"), dict):
+                node["createArgument"]["holding"]["account"]["owner"] = owner
+                hits += 1
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(doc)
+    if hits == 0:
+        raise SystemExit(f"tamper: no CreatedEvent for {cid} in {update_path}")
+    json.dump(doc, open(update_path, "w"), indent=2)
+
 d = json.load(open(path))
 exec(expr)
 json.dump(d, open(path, "w"), indent=2)
