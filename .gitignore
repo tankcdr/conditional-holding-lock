@@ -25,6 +25,10 @@ contracts/evm/lib/
 .env.localnet.generated
 .localnet/
 
+# TypeScript integration tests
+node_modules/
+integration/.run/
+
 # IDE
 .idea/
 .vscode/

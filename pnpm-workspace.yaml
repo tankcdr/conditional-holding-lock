@@ -1,0 +1,4 @@
+# Copyright (c) 2026 Long Run Advisory. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+packages:
+  - integration

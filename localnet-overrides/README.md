@@ -1,23 +1,39 @@
-# Localnet overlays (legacy cn-quickstart overlay)
+# Localnet overrides
 
-The `localnet` submodule is `digital-asset/cn-quickstart` pinned to the same
-SHA the overlay was pinned to (`fe56d46`). Two kinds of change are not in that pin:
+The localnet stack consists of two parts: Splice's own vendored tree and one file of ours.
 
-## 1. Splice confs (`splice-0.6.7/`)
+## Splice tree
 
-Verbatim `cluster/compose/localnet/conf/splice/*` from splice-app v0.6.7.
-Quickstart still has pre-0.6.7 keys (`sequencer-admin-client`); 0.6.7 renamed
-them to `synchronizer-nodes.current`. `docker-compose.localnet.yml` mounts
-these files into the splice container. Delete once the submodule is bumped.
+`splice-0.8.0/` is the directory `cluster/compose/localnet/` from the Splice repository
+(`canton-network/splice`, tag `0.8.0`, commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`),
+downloaded verbatim and never hand-edited. The `SOURCE.json` file in that directory records the
+repository, tag, commit hash, source (local checkout or tarball), extraction path, and timestamp.
 
-## 2. CIP DARs
+`scripts/localnet-sync.sh [<tag>] [--check]` re-materializes this tree whenever Mainnet moves to
+a new Splice version. It reads the current Mainnet version from
+`https://docs.global.canton.network.sync.global/info` (or accepts an explicit tag), resolves the
+tag's commit against the Splice GitHub API, and extracts `cluster/compose/localnet/` into the
+appropriate directory. Idempotent: if the tree is already materialized and byte-identical
+(excluding `SOURCE.json`), nothing is changed. The `--check` flag diffs without modifying anything.
 
-`splice-app` does not contain `splice-api-token-conditional-lock-v1`.
-`scripts/localnet-bootstrap.sh` builds the DARs and `POST`s them to
-`http://localhost:3975/v2/packages`
-uses for `id-ccse-v2`.
+## First-party file
 
-```bash
-./scripts/localnet.sh              # compose up + bootstrap
-./scripts/localnet-bootstrap.sh    # re-upload onto a running box
-```
+`conditional-lock.compose.yaml` is the only file in this directory that we maintain. It is a
+Docker Compose layer on the `canton` service, pinning the app-provider participant's admin token
+(`scripts/lib/localnet_token.py --admin` reads it back out of this file).
+
+Daml Script allocates its own parties at runtime. Canton's AllocateParty grants act-as rights
+only to the user named in the request (which Daml Script does not set), so a token for a generic
+user cannot act as the parties the script just created. The admin token carries `ClaimActAsAnyParty`.
+The localnet runs Splice's vendored `auth-on` profiles; Splice's tree already enables the admin
+claim. This layer adds the act-as-any-party claim and pins a fixed token value. Authentication
+stays on; DAR upload and `scripts/localnet-bootstrap.sh` still use the HS256 user token. The
+token is unsafe and public by design—exactly like the `secret = "unsafe"` Splice ships in the
+same tree.
+
+It is not loopback-only. Splice's `compose.yaml` binds the nginx UI ports to
+`${HOST_BIND_IP:-127.0.0.1}`, but publishes the canton participant ports and the splice validator
+ports with no bind address, so they listen on every interface. Anything that can reach this host
+on 3975 can present this token and get participant-admin plus act-as-any-party. Do not run this
+stack on an untrusted network, and never reuse this value, this mechanism, or this file against
+any real one.

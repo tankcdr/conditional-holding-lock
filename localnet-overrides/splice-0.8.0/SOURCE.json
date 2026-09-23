@@ -1,0 +1,10 @@
+{
+  "repository": "canton-network/splice",
+  "tag": "0.8.0",
+  "commit": "9330dba9e31b8893bec09ece2f5dbb496fcf17b5",
+  "source": "local-checkout",
+  "path": "cluster/compose/localnet",
+  "synced_at": "2026-09-23T00:55:33Z",
+  "mainnet_splice_version_observed": "0.8.0",
+  "tree_sha256": "c63178e02d31049dd05d76b75a6615fc9f4b6dbe7df5dd60b980df69dbdece1c"
+}

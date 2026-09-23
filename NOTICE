@@ -4,4 +4,5 @@ Copyright 2026 Long Run Advisory
 Splice Daml source is not distributed in this repository. It is developed on
 https://github.com/tankcdr/splice (Apache-2.0, Digital Asset and contributors).
 localnet/ is the digital-asset/cn-quickstart submodule (0BSD).
-localnet-overrides/splice-0.6.7 confs are from splice-app v0.6.7 (Apache-2.0).
+localnet-overrides/splice-0.8.0/ is the verbatim cluster/compose/localnet tree from
+canton-network/splice tag 0.8.0 (Apache-2.0, Digital Asset and contributors).

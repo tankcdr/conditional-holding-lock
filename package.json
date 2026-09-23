@@ -2,6 +2,9 @@
   "name": "conditional-holding-lock",
   "private": true,
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "setup": "./scripts/init-submodules.sh && ./scripts/fetch-dars.sh",
     "fetch-dars": "./scripts/fetch-dars.sh",
@@ -24,6 +27,10 @@
     "localnet:clean": "./scripts/localnet.sh --clean",
     "localnet:bootstrap": "./scripts/localnet-bootstrap.sh",
     "localnet:status": "./scripts/lib/localnet-compose.sh ps",
-    "localnet:logs": "./scripts/lib/localnet-compose.sh logs -f"
+    "localnet:logs": "./scripts/lib/localnet-compose.sh logs -f",
+    "localnet:sync": "./scripts/localnet-sync.sh",
+    "localnet:prove": "./scripts/localnet-prove.sh",
+    "test:integration": "pnpm --filter @conditional-lock/integration test",
+    "test:integration:evidence": "just test-integration-evidence"
   }
 }

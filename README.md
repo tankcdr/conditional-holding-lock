@@ -37,7 +37,7 @@ just verify-reproducible      # Two clean builds; compare main package IDs
 just release-dry-run 0.1.0    # Release checks and manifest; never tags
 ```
 
-Recipe names use hyphens, such as `test-evm`; Just's [recipe-name grammar](https://github.com/casey/just/blob/master/GRAMMAR.md) does not allow `test:evm`. Individual builds are available as `build-daml`, `build-evm`, and `build-solana`. The recipes use the existing scripts and tools, which remain directly runnable. Run `just` for setup, fixture generation, and legacy localnet commands.
+Recipe names use hyphens, such as `test-evm`; Just's [recipe-name grammar](https://github.com/casey/just/blob/master/GRAMMAR.md) does not allow `test:evm`. Individual builds are available as `build-daml`, `build-evm`, and `build-solana`. The recipes use the existing scripts and tools, which remain directly runnable. Run `just` for setup, fixture generation, and localnet commands.
 
 Prerequisites: DPM with **Daml SDK 3.5.2**, **JDK 21**, Python 3, curl, Foundry (verified with 1.3.6; Solidity 0.8.24), Rust via rustup, and Solana's `cargo-build-sbf` (verified with Agave CLI 3.1.14). The Solana crate selects Rust 1.89.0 locally and the build script pins SBF platform-tools v1.52. All first-party Daml packages target **Daml-LF 2.1** with explicit serializability.
 
@@ -89,7 +89,7 @@ python3 scripts/check-compatibility.py
 | `docs/adoption-evidence.md`                      | Adoption evidence log and reference-deployment record                                                                             |
 | `docs/quickstart/`                               | The minimal consumer project `scripts/quickstart-check.sh` builds and runs end to end                                            |
 | `examples/devnet-escrow/`                        | The escrowed-DvP-with-dispute-window script the reference deployment runs                                                         |
-| `localnet/`, `localnet-overrides/`               | Legacy cn-quickstart Splice layout, separate from the proof matrix                                                               |
+| `localnet/`, `localnet-overrides/`               | Splice localnet at the Mainnet release; localnet/ is reference material                                                         |
 
 Splice source and downloaded DARs are never committed here. A future Splice implementation PR belongs on a Splice fork.
 
@@ -107,12 +107,67 @@ The reference deployment runs the CIP's worked example of escrowed delivery-vers
 
 The adapter consumes and creates **actual published `Splice.Testing.Tokens.TestTokenV2.Holding.Token` contracts**. Locked funds have a distinct backing template, visible through both holding interfaces. Acceptance adds approver account parties as ledger signatories; subsequent enactment can use that stored authority. Both the account owner and provider, when present, must authorize account movements. Factories are registry-issued, single-use contracts with distinct lock IDs.
 
-This proves the Daml mechanics. It is not a Canton Coin integration, a full token-standard conformance certification, a registry HTTP server, or a public-network deployment. TestTokenV2 is a test issuer; production registry account policies, preapprovals, external signing, and Canton Coin submission delays still need their planned implementations.
+This proves the Daml mechanics. The integration test below settles a real Canton Coin (Amulet) payment leg atomically against a locked TestTokenV2 delivery leg, demonstrating the conditional lock as a building block in multi-registry DvP. The lock is not a Canton Coin lock—the locked asset remains registry-issued TestTokenV2—but it settles against one as a counter-asset. This is not a token-standard conformance certification, a registry HTTP server, or a public-network deployment. TestTokenV2 is a test issuer; production registry account policies, preapprovals, external signing, and Canton Coin submission delays still need their planned implementations.
 
 The Solana proof establishes matching SHA-256 and Keccak-256 byte semantics in a local VM. A Solana token escrow, cross-chain swap lifecycle, and public-cluster compatibility validation remain separate work.
 
-## Legacy Splice localnet
+## Splice localnet at the Mainnet release
 
-The compose overlay remains pinned to Splice 0.6.7 / Canton image 0.6.8, whose participant reports Canton 3.5.4. It is **not** the current network compatibility target. The existing running stack on the development machine belongs to another checkout and was left running.
+The localnet stack is Splice's own compose files, vendored verbatim under `localnet-overrides/splice-0.8.0/` (Splice commit `9330dba9e31b8893bec09ece2f5dbb496fcf17b5`, tag `0.8.0`), which is what Canton Mainnet runs today. The driver (`scripts/lib/localnet-compose.sh`, project name `conditional-lock-localnet`) runs Splice's compose and resource-constraints files with the `sv`, `app-provider`, and `app-user` profiles in their `auth-on` variants, using Splice's `compose.env` and `env/common.env` as env files. The only first-party file is `localnet-overrides/conditional-lock.compose.yaml`, a compose layer that pins the app-provider participant's admin token.
 
-For runtime compatibility checks use `test-compatibility.sh`. Use the legacy `localnet.sh` only when deliberately working on that topology; its fixed container names and ports are shared with the legacy overlay. It requires `./scripts/init-submodules.sh` and `.env.localnet` copied from `.env.localnet.example`.
+```bash
+./scripts/localnet-sync.sh [<tag>] [--check]  # Materialize/update the Splice tree
+./scripts/localnet.sh                         # Up, wait for readiness, bootstrap
+./scripts/localnet.sh --down                  # Stop, keep volumes
+./scripts/localnet.sh --clean                 # Stop, delete volumes
+./scripts/localnet-bootstrap.sh               # Build DARs, upload three first-party ones to both participants
+./scripts/localnet-prove.sh                   # Escrowed-DvP proof, writes evidence
+```
+
+Each script also has a `just` recipe and an `npm run localnet:<name>` script. Note that `just check-compatibility` fails when `.env.localnet.example`'s `IMAGE_TAG` is not the Splice version live on Mainnet, so `just release` fails until you re-sync the localnet with `./scripts/localnet-sync.sh`.
+
+Two credentials are in play, both unsafe by design, both from `scripts/lib/localnet_token.py`. The default is an HS256 JWT for user `ledger-api-user`, audience `https://canton.network.global`, secret `unsafe`; the helper reads the user and secret from `env/<node>-auth-on.env` and `conf/canton/<node>/app-auth.conf` in the vendored tree, one per participant. DAR upload uses it. With `--admin`, the tool returns the participant admin token that `localnet-overrides/conditional-lock.compose.yaml` pins for the app-provider participant, carrying claims `ClaimPublic`, `ClaimAdmin`, and `ClaimActAsAnyParty`. Anything that runs Daml Script needs the admin token: Daml Script allocates its own parties at runtime, Canton grants act-as rights only to the user named in the `AllocateParty` request's `userId` field (which Daml Script does not set; `dpm script --user-id` changes only the submitting user), and Canton 3.5.16 has no `CanActAsAnyParty` right to pre-grant. Splice's vendored tree already enables the admin claim; our compose layer adds the act-as-any-party claim and pins the token value. Authentication stays on; this is a stronger named credential, not a bypass.
+
+Neither credential is loopback-only. Splice's `compose.yaml` binds the nginx UI ports to `${HOST_BIND_IP:-127.0.0.1}`, but publishes the canton participant ports (3901, 3975, and their 2/4 siblings) and the splice validator ports with no bind address, so they listen on every interface — that is Splice's own localnet behaviour, not something this repository changed. Anything that can reach this host on 3975 can present the admin token and get participant-admin plus act-as-any-party. Do not run this stack on an untrusted network, and never reuse either credential against a real one.
+
+Daml Script derives deterministic party-id hints (e.g., `alice-d4d95138`), so a second proof run against the same persistent participant fails at `allocateParty` with "Party already exists". The preflight detects this and instructs you to run `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
+
+The 70-script Daml test suite runs against this localnet, 57 of 70 passing, in a single `dpm script --all` invocation on a fresh ledger:
+
+```bash
+T=$(mktemp); chmod 600 "$T"; python3 scripts/lib/localnet_token.py --admin > "$T"
+dpm script --all --dar packages/conditional-lock-test/.daml/dist/conditional-lock-test-1.0.0.dar \
+  --upload-dar yes --ledger-host 127.0.0.1 --ledger-port 3901 \
+  --user-id ledger-api-user --access-token-file "$T"; rm -f "$T"
+```
+
+All 13 failures are the same thing: this participant has no controllable clock. It reports `staticTime.supported: false`, so eleven scripts fail at `setTime` with "setTime is not supported in wallclock mode", and two more (`test_malformedTermsAndFundingFailWithoutConsumingInputs`, `test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected`) assert on expiry boundaries they cannot reach without one. None fail on party allocation, authentication, or lock semantics. It must be one `--all` invocation rather than one per script, because Daml Script allocates a party once per process but derives the same id hint every time, so a second process collides on the first `allocateParty`.
+
+`dpm test` and `./scripts/test-compatibility.sh` remain the suite's home — each gets a fresh controlled-time ledger per run, and all 70 pass there. What the localnet adds is the other 57 running against the Splice release Mainnet runs.
+
+Ports follow Splice's pattern (suffixes 901 gRPC Ledger, 902 admin, 975 JSON Ledger, 903 validator admin): app-provider is 3975 JSON / 3901 gRPC / 3903 validator; app-user is 2975 / 2901 / 2903; SV is 4975 / 4901 / 4903. UIs: app-user wallet `http://wallet.localhost:2000`, app-provider wallet `http://wallet.localhost:3000`, SV `http://sv.localhost:4000`, scan `http://scan.localhost:4000`. Postgres is on host port 5433 (`DB_PORT` in `.env.localnet.example`), not Splice's 5432, because another project's stack commonly holds 5432.
+
+The `localnet/` submodule (`digital-asset/cn-quickstart`, 0BSD, currently pinned to `33eddeb992d4a16de18685585617a4c54e91ceac`) is no longer used by the stack itself; it provides reference material: the quickstart application, devnet and keycloak modules, and `quickstart/sync-network.sh` as prior art for reading a version out of a network info URL (`quickstart/sync-network.sh` reads `.synchronizer.active.version`; `scripts/localnet-sync.sh` and `scripts/check-compatibility.py` read `.sv.version` the same way).
+
+## Integration test against the mainnet-matched localnet
+
+A CIP-0112 DvP-between-registries integration test runs on the localnet, proving the conditional lock in a real multi-registry settlement. It settles a **real Amulet payment leg** against a **TestTokenV2 delivery leg under the conditional lock**, in a **single atomic transaction** — two commands (`SettlementFactory_SettleBatch` for Amulet and `ConditionalLock_Enact` for TestTokenV2) in one submission, captured in a single `updateId`. One `executor` party acts as the settlement venue and sole member of both Amulet allocations' `settlement.executors`, named in the lock's `Guard_Parties [executor] 1` as the sole enactor. This shape is required for atomicity: Amulet's settlement batch requires the actors to be exactly the allocation's executors, so a two-counterparty `Guard_Parties [alice, bob] 2` enactment cannot submit a single transaction from one participant without external signing. Both counterparties allocate the Amulet payment leg — bob a `SENDERSIDE` allocation (he pays), alice a `RECEIVERSIDE` one (she receives) — because Amulet's settlement validation rejects a batch with missing authorization from any party.
+
+A second lock on the same terms with a short deadline proves the expiry path: after the deadline the `ConditionalLock_Enact` is rejected with "no alternative is satisfied"; after `expiresAt` the `ConditionalLock_Expire` returns the full locked amount to alice unlocked, and bob withdraws his Amulet allocation.
+
+The test is re-runnable — fresh `TokenRules`, factory, and lock IDs per run, with parties looked up before being allocated — so no `./scripts/localnet.sh --clean` is needed between runs. Running requires Node 22+ and pnpm. The first `pnpm install` is needed; subsequent runs skip it. The harness refuses to run with a clear message if the localnet is not up:
+
+```bash
+./scripts/localnet.sh          # Up, wait, build and upload DARs to both participants
+pnpm install
+pnpm test:integration          # or: just test-integration
+./scripts/localnet.sh --down   # Stop, keep volumes
+```
+
+Parties: `alice` is the app-provider participant's validator wallet (seller, holds locked TestTokenV2); `bob` is the app-user participant's wallet (buyer, pays the Amulet); `cl-registry` is the TestTokenV2 registry admin and `cl-executor` the settlement venue, both allocated on app-provider. Once bob has approved, the active lock's signatories are the registry admin, alice as the authorizer, and bob as the approved receiver, so bob's participant is an informee of every lock transaction. Canton rejects at confirmation when an informee's participant cannot resolve the package, which is why both participants get the DARs in the bootstrap step above.
+
+Evidence is recorded by `scripts/record-reference-proof.py --kind dvp` to `docs/runbook/localnet-mainnet-<IMAGE_TAG>-dvp-evidence.json`, capturing the real update ID, both legs' contract IDs, the two-command submission proof, and the time boundaries for the expiry path.
+
+Regenerate the evidence from the last run's artifacts with `just test-integration-evidence` (or `pnpm test:integration:evidence`). It reads what the run recorded and refuses anything it cannot cross-check against the participant's own copy of the update; it is never hand-edited.
+
+One known flake, stated rather than papered over. On one occasion out of more than twenty runs, the suite failed on the first attempt immediately after a cold `./scripts/localnet.sh`, and passed on every attempt after it, including a further cold start. It reported `1 passed | 2 skipped`, which places the failure in the settlement suite's `beforeAll` — the setup that issues the TestTokenV2, creates and approves the lock, and creates both Amulet allocations — and not in the settlement itself, since the expiry test passed in the same run. The likely reading is that some store on the freshly started validators had not caught up; that was not confirmed, and the failure has not reproduced, so no retry was added to hide it. A failed run is safe to repeat: it withdraws every Amulet allocation it created before the error propagates, and writes no run artifacts at all, so nothing stale can be turned into evidence. If the first run after a cold start fails, run it again; if it fails twice, treat that as a real failure and read the error.

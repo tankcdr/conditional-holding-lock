@@ -1,0 +1,49 @@
+# Copyright (c) 2026 Long Run Advisory. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# This repository's only addition to Splice's localnet stack. Everything under
+# localnet-overrides/splice-<tag>/ is Splice's tree verbatim and must stay that
+# way (scripts/localnet-sync.sh --check diffs it against the tag), so anything
+# we need goes here, as a compose layer on the same service -- the same
+# mechanism Splice's own resource-constraints.yaml uses.
+#
+# WHY: the localnet runs the auth-on profiles, and Daml Script allocates its
+# own parties at runtime. Canton's AllocateParty grants act-as rights only to
+# the user named in the request's `userId` field, and Daml Script does not set
+# it (`dpm script --user-id` changes only the submitting user), so a token for
+# `ledger-api-user` cannot act as the parties the script just allocated, and
+# Canton 3.5.16 has no CanActAsAnyParty right to pre-grant. Every submit fails
+# with PERMISSION_DENIED "Claims do not authorize to act as party".
+#
+# Canton's own answer to this is the participant admin token
+# (AdminTokenConfig in canton/community/base/.../ServerConfig.scala): a fixed
+# bearer whose claims include act-as-any-party. Splice's vendored
+# conf/canton/app.conf already turns on `admin-token-config.admin-claim`; we
+# add `act-as-any-party-claim` and pin the token so scripts can present it.
+#
+# This leaves the participant's authentication ON. It is a stronger, named
+# credential, not a bypass: DAR upload and scripts/localnet-bootstrap.sh still
+# use the ordinary HS256 user token minted by scripts/lib/localnet_token.py.
+#
+# The token below is UNSAFE AND PUBLIC BY DESIGN, exactly like the `secret =
+# "unsafe"` that Splice ships in the same tree.
+#
+# It is not loopback-only, and neither is Splice's. Splice's compose.yaml binds
+# the nginx UI ports to ${HOST_BIND_IP:-127.0.0.1}, but publishes the canton
+# participant ports (3901/3975/...) and the splice validator ports with no bind
+# address at all, so they listen on every interface. Anything that can reach
+# this host on 3975 can present this token and get participant-admin plus
+# act-as-any-party. Do not run this stack on an untrusted network, and never
+# reuse this value, this mechanism, or this file against any real one.
+#
+# scripts/lib/localnet_token.py --node app-provider --admin reads the value
+# back out of this file, so there is one place it is written down.
+services:
+  canton:
+    environment:
+      ADDITIONAL_CONFIG_CONDITIONAL_LOCK_ADMIN_TOKEN: |
+        canton.participants.app-provider.ledger-api.admin-token-config {
+          fixed-admin-token = "b7fe1abe216b9b81ac0b8f63d53b1647ce4c568d1e177e9b8fa258504a8fe30f"
+          act-as-any-party-claim = true
+          admin-claim = true
+        }
