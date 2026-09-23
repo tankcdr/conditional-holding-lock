@@ -35,6 +35,7 @@ just check-compatibility      # Check live Canton version drift
 just check-pin                # Verify SPLICE_PIN matches its recorded commit
 just verify-reproducible      # Two clean builds; compare main package IDs
 just release-dry-run 0.1.0    # Release checks and manifest; never tags
+just publish 0.1.0            # just release, then push the tag and create the GitHub Release
 ```
 
 Recipe names use hyphens, such as `test-evm`; Just's [recipe-name grammar](https://github.com/casey/just/blob/master/GRAMMAR.md) does not allow `test:evm`. Individual builds are available as `build-daml`, `build-evm`, and `build-solana`. The recipes use the existing scripts and tools, which remain directly runnable. Run `just` for setup, fixture generation, and localnet commands.

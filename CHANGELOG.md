@@ -69,6 +69,8 @@ Nothing yet.
   participant cannot resolve the package; uploading only to app-provider left every
   cross-participant lock failing at confirmation.
 
+- `just publish <version>` runs `just release`, then `scripts/publish-release.sh` pushes the tag and creates the GitHub Release with the three consumer DARs, the manifest and the hash vectors, refusing unless the tag points at HEAD and every asset's SHA-256 equals the manifest's. `just publish-dry-run` shows what it would do.
+
 ### Changed
 
 - The escrowed-DvP reference deployment and 57 of the 70 Daml Script tests now run against a

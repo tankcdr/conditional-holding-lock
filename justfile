@@ -92,6 +92,15 @@ release version:
     python3 ./scripts/make-release-manifest.py "{{version}}"
     git tag -a "v{{version}}" -m "conditional-holding-lock v{{version}}"
 
+# Cut and publish a release: `just release`, then push the tag and create the GitHub Release with its assets.
+publish version:
+    just release {{version}}
+    ./scripts/publish-release.sh {{version}}
+
+# Check what `just publish` would push and attach, without pushing or creating anything.
+publish-dry-run version:
+    ./scripts/publish-release.sh {{version}} --dry-run
+
 # Dry-run the release checks and manifest without tagging; never tags.
 release-dry-run version: check-pin check-compatibility verify-reproducible
     ./scripts/test.sh
