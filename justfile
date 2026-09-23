@@ -92,9 +92,13 @@ release version:
     python3 ./scripts/make-release-manifest.py "{{version}}"
     git tag -a "v{{version}}" -m "conditional-holding-lock v{{version}}"
 
-# Cut and publish a release: `just release`, then push the tag and create the GitHub Release with its assets.
+# Cut and publish a release: `just release` (skipped when the tag already points at HEAD), then push the tag and create the GitHub Release.
 publish version:
-    just release {{version}}
+    if [ "$(git rev-parse -q --verify "refs/tags/v{{version}}^{commit}" 2>/dev/null)" = "$(git rev-parse HEAD)" ]; then \
+      echo "publish: tag v{{version}} already points at HEAD; skipping 'just release'"; \
+    else \
+      just release {{version}}; \
+    fi
     ./scripts/publish-release.sh {{version}}
 
 # Check what `just publish` would push and attach, without pushing or creating anything.
