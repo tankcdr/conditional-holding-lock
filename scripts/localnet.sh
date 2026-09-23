@@ -48,16 +48,30 @@ fi
 localnet_env
 localnet_check_container_names
 
+# Both wait loops probe the app-provider node, the one this repository uploads
+# to and proves against. Derive their URLs from LEDGER_JSON_API rather than
+# writing :3975 and :3903 down a second time, so changing the port in
+# .env.localnet cannot leave this script polling the old one. Splice's port
+# pattern is <node><suffix>: 975 is the participant JSON API, 903 the validator
+# admin API, and the leading digit selects the node (3 = app-provider).
+JSON_BASE="${LEDGER_JSON_API:?.env.localnet must set LEDGER_JSON_API}"
+JSON_BASE="${JSON_BASE%/}"
+_json_port="${JSON_BASE##*:}"
+case "$_json_port" in
+  *975) VALIDATOR_BASE="${JSON_BASE%:*}:${_json_port%975}903" ;;
+  *) VALIDATOR_BASE="" ;;
+esac
+
 info "starting Splice localnet ${IMAGE_TAG} (project ${LOCALNET_PROJECT}, network ${DOCKER_NETWORK:-localnet})"
 info "tree: ${LOCALNET_DIR}"
 localnet_compose up -d
 
 # Readiness is proven against the app-provider node, the one this repository
 # uploads to and runs the reference deployment against.
-info "waiting for the app-provider participant JSON Ledger API on :3975"
+info "waiting for the app-provider participant JSON Ledger API at $JSON_BASE"
 for i in $(seq 1 120); do
-  if curl -sf -o /dev/null http://localhost:3975/livez 2>/dev/null \
-     || curl -s -o /dev/null -w '%{http_code}' http://localhost:3975/v2/version 2>/dev/null | grep -qE '^(200|401)$'; then
+  if curl -sf -o /dev/null "$JSON_BASE/livez" 2>/dev/null \
+     || curl -s -o /dev/null -w '%{http_code}' "$JSON_BASE/v2/version" 2>/dev/null | grep -qE '^(200|401)$'; then
     info "app-provider participant is serving"
     break
   fi
@@ -69,9 +83,12 @@ for i in $(seq 1 120); do
   sleep 5
 done
 
-info "waiting for the app-provider validator on :3903 (SV onboarding takes a few minutes)"
+if [ -z "$VALIDATOR_BASE" ]; then
+  info "LEDGER_JSON_API port is not a Splice <node>975 port; skipping the validator wait"
+fi
+info "waiting for the app-provider validator at ${VALIDATOR_BASE:-<skipped>} (SV onboarding takes a few minutes)"
 for i in $(seq 1 240); do
-  if curl -sf -o /dev/null http://localhost:3903/api/validator/readyz 2>/dev/null; then
+  if [ -z "$VALIDATOR_BASE" ] || curl -sf -o /dev/null "$VALIDATOR_BASE/api/validator/readyz" 2>/dev/null; then
     info "app-provider validator is ready"
     break
   fi

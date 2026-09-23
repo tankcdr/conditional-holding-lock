@@ -29,5 +29,11 @@ The localnet runs Splice's vendored `auth-on` profiles; Splice's tree already en
 claim. This layer adds the act-as-any-party claim and pins a fixed token value. Authentication
 stays on; DAR upload and `scripts/localnet-bootstrap.sh` still use the HS256 user token. The
 token is unsafe and public by design—exactly like the `secret = "unsafe"` Splice ships in the
-same tree. It grants full control of a throwaway local participant that binds to this machine
-only. Never reuse this value, this mechanism, or this file against any real network.
+same tree.
+
+It is not loopback-only. Splice's `compose.yaml` binds the nginx UI ports to
+`${HOST_BIND_IP:-127.0.0.1}`, but publishes the canton participant ports and the splice validator
+ports with no bind address, so they listen on every interface. Anything that can reach this host
+on 3975 can present this token and get participant-admin plus act-as-any-party. Do not run this
+stack on an untrusted network, and never reuse this value, this mechanism, or this file against
+any real one.

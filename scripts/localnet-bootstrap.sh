@@ -24,7 +24,7 @@ info() { printf '[INFO]  %s\n' "$*"; }
 
 localnet_env
 
-JSON_API="${LEDGER_JSON_API:-${CANTON_API_URL:-http://localhost:3975}}"
+JSON_API="${LEDGER_JSON_API:?.env.localnet must set LEDGER_JSON_API}"
 
 info "building DARs"
 "$ROOT/scripts/build-dars.sh"
