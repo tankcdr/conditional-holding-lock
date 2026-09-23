@@ -8,10 +8,12 @@
 # Refuses unless the tag points at HEAD, the worktree is clean, the manifest
 # was written at HEAD from a clean tree, and every asset's SHA-256 equals the
 # manifest's. That last check is what makes "attach exactly what the release
-# built" enforceable: a rebuild between `just release` and this script changes
-# the DAR bytes (zip timestamps) without changing package IDs, and consumers
-# verify downloads against the manifest's digests. --dry-run performs every
-# check and prints the commands without pushing or creating anything.
+# built" enforceable: consumers verify downloads against the manifest's
+# digests, so the attached bytes must be the ones that were hashed. (A DPM
+# rebuild of unchanged sources on the same toolchain reproduced identical
+# bytes when this was checked; the guard does not rely on that.) --dry-run
+# performs every check and prints the commands without pushing or creating
+# anything.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
