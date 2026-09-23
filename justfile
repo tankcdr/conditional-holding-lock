@@ -148,7 +148,7 @@ test-integration:
 test-integration-evidence:
     tag="$(grep -E '^IMAGE_TAG=' .env.localnet 2>/dev/null | cut -d= -f2 || true)"; \
     if [ -z "$tag" ]; then \
-      echo "test-integration-evidence: no IMAGE_TAG found in .env.localnet; fix it with ./scripts/localnet-sync.sh" >&2; \
+      echo "test-integration-evidence: no IMAGE_TAG in .env.localnet; it predates the Splice compose stack. Delete it and rerun ./scripts/localnet.sh" >&2; \
       exit 1; \
     fi; \
     python3 ./scripts/record-reference-proof.py --kind dvp --network localnet-mainnet \
