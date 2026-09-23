@@ -17,6 +17,44 @@ def fetch(url):
     return subprocess.check_output(["curl", "-fsSL", "--retry", "2", "--connect-timeout", "15", "--max-time", "60", url])
 
 
+def localnet_row(mainnet_splice, drift):
+    """Compare the vendored localnet stack's Splice tag with live Mainnet.
+
+    Appends to `drift` in the same "expected X, live Y" shape the network rows
+    use, so `just release` fails when Mainnet moves and the localnet has not
+    been re-synced with scripts/localnet-sync.sh.
+    """
+    row = {"image_tag": None, "overrides_dir": None, "source": None}
+    example = ROOT / ".env.localnet.example"
+    match = re.search(r"^\s*IMAGE_TAG\s*=\s*(\S+)\s*$", example.read_text(), re.M)
+    if not match:
+        drift.append(f"localnet: {example.name} has no IMAGE_TAG line")
+        return row
+    tag = match.group(1).strip('"').strip("'")
+    row["image_tag"] = tag
+
+    overrides = ROOT / "localnet-overrides" / f"splice-{tag}"
+    row["overrides_dir"] = str(overrides.relative_to(ROOT))
+    source_path = overrides / "SOURCE.json"
+    if not source_path.exists():
+        drift.append(
+            f"localnet: {source_path.relative_to(ROOT)} is missing; "
+            f"run scripts/localnet-sync.sh to materialize the Splice {tag} localnet tree"
+        )
+    else:
+        source = json.loads(source_path.read_text())
+        row["source"] = {k: source.get(k) for k in ("repository", "tag", "commit", "synced_at")}
+        if source.get("tag") != tag:
+            drift.append(
+                f"localnet: {source_path.relative_to(ROOT)} records tag {source.get('tag')}, "
+                f"but .env.localnet.example pins IMAGE_TAG {tag}"
+            )
+
+    if mainnet_splice and tag != mainnet_splice:
+        drift.append(f"localnet.splice: expected {tag}, live {mainnet_splice}")
+    return row
+
+
 def main():
     pin = json.loads((ROOT / "SPLICE_PIN").read_text())
     expected = json.loads((ROOT / "fixtures/runtime-versions.json").read_text())
@@ -42,6 +80,14 @@ def main():
         for key, value in actual.items():
             if value != config[key] and not config.get("informational"):
                 drift.append(f"{name}.{key}: expected {config[key]}, live {value}")
+    # localnet row: the vendored Splice localnet stack must be at the same
+    # release Mainnet is running, which is what "keep the localnet up to date
+    # with mainnet" means. The pin lives in .env.localnet.example's IMAGE_TAG
+    # (the single tag that selects every Splice image) and is backed by
+    # localnet-overrides/splice-<tag>/SOURCE.json, written by
+    # scripts/localnet-sync.sh from the Splice tag itself.
+    report["localnet"] = localnet_row(report["networks"].get("mainnet", {}).get("splice"), drift)
+
     for package in pin["packages"]:
         url = f'https://raw.githubusercontent.com/{pin["repository"]}/{pin["ref"]}/daml/dars/{package["file"]}'
         digest = hashlib.sha256(fetch(url)).hexdigest()

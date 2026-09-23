@@ -5,11 +5,20 @@
 # (examples/devnet-escrow) against a real participant under wall-clock time,
 # and record the resulting evidence.
 #
-# Usage: scripts/devnet-reference.sh [--network <localnet|devnet>] [--release <tag>]
-#                                    [--dars <dir>] [--window <seconds>] [--manifest <path>]
+# Usage: scripts/devnet-reference.sh [--network <localnet|localnet-mainnet|devnet>]
+#                                    [--release <tag>] [--dars <dir>]
+#                                    [--window <seconds>] [--manifest <path>]
 #
 # --network localnet (default): starts an isolated, wall-clock Canton sandbox
 #   pinned to the testnet runtime (Canton 3.5.17) and runs against it.
+# --network localnet-mainnet: the Docker Splice localnet at the Mainnet release
+#   (./scripts/localnet.sh), i.e. a real participant with a real synchronizer
+#   rather than a sandbox. Takes the external-participant path below: it starts
+#   nothing and requires LEDGER_JSON_API, LEDGER_HOST, LEDGER_PORT, and (because
+#   the localnet runs the auth-on profiles) LEDGER_TOKEN, all of which
+#   `just localnet-prove` supplies from .env.localnet and
+#   scripts/lib/localnet_token.py. Evidence is written per Splice image tag,
+#   which is read from .env.localnet's IMAGE_TAG or from --runtime-tag.
 # --network devnet: does not start anything. Requires LEDGER_JSON_API,
 #   LEDGER_HOST, and LEDGER_PORT from the environment. If LEDGER_TOKEN is also
 #   set, it is written to a mode-600 temp file and passed to `dpm script` as
@@ -61,6 +70,7 @@ release=""
 dars_dir=""
 window=20
 manifest=""
+runtime_tag=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,6 +89,9 @@ while [[ $# -gt 0 ]]; do
     --manifest)
       [[ $# -ge 2 ]] || { echo "devnet-reference: --manifest requires an argument" >&2; exit 1; }
       manifest="$2"; shift 2 ;;
+    --runtime-tag)
+      [[ $# -ge 2 ]] || { echo "devnet-reference: --runtime-tag requires an argument" >&2; exit 1; }
+      runtime_tag="$2"; shift 2 ;;
     *)
       echo "devnet-reference: unknown argument: $1" >&2
       exit 1 ;;
@@ -86,9 +99,27 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$network" in
-  localnet|devnet) ;;
-  *) echo "devnet-reference: --network must be localnet or devnet, got: $network" >&2; exit 1 ;;
+  localnet|localnet-mainnet|devnet) ;;
+  *) echo "devnet-reference: --network must be localnet, localnet-mainnet, or devnet, got: $network" >&2; exit 1 ;;
 esac
+
+# Every network other than the in-process sandbox is an external participant:
+# nothing is started for it, and its endpoint and token must come from the
+# environment. Branch on that property, not on the literal "devnet", so adding
+# a network does not have to be echoed in four places.
+external_participant=true
+[[ "$network" == "localnet" ]] && external_participant=false
+
+# Splice image tag for the evidence filename, so one localnet's evidence never
+# silently overwrites another release's.
+runtime_tag="${runtime_tag:-}"
+if [[ "$network" == "localnet-mainnet" && -z "$runtime_tag" && -f "$ROOT/.env.localnet" ]]; then
+  runtime_tag="$(sed -n 's/^[[:space:]]*IMAGE_TAG[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' "$ROOT/.env.localnet" | head -1)"
+fi
+if [[ "$network" == "localnet-mainnet" && -z "$runtime_tag" ]]; then
+  echo "devnet-reference: --network localnet-mainnet needs the Splice image tag; pass --runtime-tag <tag> or create .env.localnet" >&2
+  exit 1
+fi
 
 # The settle path needs headroom to complete five submissions before the
 # deadline; 2s was observed locally against a 20s window, but that margin is
@@ -104,14 +135,15 @@ if (( window < 15 )); then
   exit 1
 fi
 
-# Fail fast, before touching any network, if devnet mode is missing what it needs.
-if [[ "$network" == "devnet" ]]; then
+# Fail fast, before touching any network, if an external-participant run is
+# missing what it needs.
+if $external_participant; then
   if [[ -z "${LEDGER_JSON_API:-}" ]]; then
-    echo "devnet-reference: --network devnet requires LEDGER_JSON_API (and LEDGER_HOST/LEDGER_PORT) in the environment; LEDGER_JSON_API is unset" >&2
+    echo "devnet-reference: --network $network requires LEDGER_JSON_API (and LEDGER_HOST/LEDGER_PORT) in the environment; LEDGER_JSON_API is unset" >&2
     exit 1
   fi
   if [[ -z "${LEDGER_HOST:-}" || -z "${LEDGER_PORT:-}" ]]; then
-    echo "devnet-reference: --network devnet requires LEDGER_JSON_API, LEDGER_HOST, and LEDGER_PORT in the environment; LEDGER_HOST/LEDGER_PORT is unset" >&2
+    echo "devnet-reference: --network $network requires LEDGER_JSON_API, LEDGER_HOST, and LEDGER_PORT in the environment; LEDGER_HOST/LEDGER_PORT is unset" >&2
     exit 1
   fi
   if [[ -n "${LEDGER_CACRT:-}" && ! -f "${LEDGER_CACRT}" ]]; then
@@ -142,7 +174,7 @@ token_file=""
 header_file=""
 token_args=()
 auth_header=()
-if [[ "$network" == "devnet" && -n "${LEDGER_TOKEN:-}" ]]; then
+if $external_participant && [[ -n "${LEDGER_TOKEN:-}" ]]; then
   token_file="$(mktemp)"
   header_file="$(mktemp)"
   trap 'rm -f "$token_file" "$header_file"' EXIT
@@ -245,10 +277,13 @@ curl -fsS ${auth_header[@]+"${auth_header[@]}"} "$LEDGER_JSON_API/v2/version" > 
 # script itself returned instead and records that honestly.
 
 record_args=(--network "$network" --run-dir "$run_dir" --dar-dir "$staging")
+if [[ -n "$runtime_tag" ]]; then record_args+=(--runtime-tag "$runtime_tag"); fi
 if [[ -n "$release" ]]; then record_args+=(--release "$release"); fi
 if [[ -n "$sandbox_runtime" ]]; then record_args+=(--sandbox-runtime "$sandbox_runtime"); fi
 
 python3 "$ROOT/scripts/record-reference-proof.py" "${record_args[@]}"
 
-evidence_path="$ROOT/docs/runbook/${network}-reference-evidence.json"
+evidence_slug="$network"
+if [[ -n "$runtime_tag" ]]; then evidence_slug="$network-$runtime_tag"; fi
+evidence_path="$ROOT/docs/runbook/${evidence_slug}-reference-evidence.json"
 echo "PASS $network; evidence: $evidence_path"

@@ -39,11 +39,13 @@ UPDATE_ID_FALLBACK = (
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--network", required=True, choices=["localnet", "devnet"])
+    parser.add_argument("--network", required=True, choices=["localnet", "localnet-mainnet", "devnet"])
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--dar-dir", required=True, type=Path)
     parser.add_argument("--release")
     parser.add_argument("--sandbox-runtime", choices=["mainnet", "testnet"])
+    parser.add_argument("--runtime-tag", help="Splice release tag of the participant this ran against "
+                                              "(localnet-mainnet); becomes part of the evidence filename")
     return parser.parse_args()
 
 
@@ -213,10 +215,13 @@ def main():
     }
     if args.network == "localnet":
         evidence["sandbox_runtime"] = args.sandbox_runtime or "testnet"
+    if args.runtime_tag:
+        evidence["splice_image_tag"] = args.runtime_tag
 
     assert "LEDGER_TOKEN" not in evidence and "Authorization" not in json.dumps(evidence)
 
-    output_path = ROOT / f"docs/runbook/{args.network}-reference-evidence.json"
+    slug = f"{args.network}-{args.runtime_tag}" if args.runtime_tag else args.network
+    output_path = ROOT / f"docs/runbook/{slug}-reference-evidence.json"
     output_path.write_text(json.dumps(evidence, indent=2) + "\n")
     print(f"Wrote {output_path}")
 
