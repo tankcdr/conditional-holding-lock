@@ -153,4 +153,5 @@ test-integration-evidence:
     fi; \
     python3 ./scripts/record-reference-proof.py --kind dvp --network localnet-mainnet \
       --runtime-tag "$tag" \
-      --run-dir integration/.run
+      --run-dir integration/.run; \
+    ./scripts/tests/dvp-evidence-tamper.sh "$tag"

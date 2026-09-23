@@ -315,6 +315,7 @@ fi
 if [[ "$NOTHING_TO_DO" -eq 1 ]]; then
   SHORT_SHA="${COMMIT:0:7}"
   rewrite_env_file "$ROOT/.env.localnet.example"
+  if [[ -f "$ROOT/.env.localnet" ]]; then rewrite_env_file "$ROOT/.env.localnet"; fi
   echo "localnet-sync: localnet-overrides/splice-$TAG already at $TAG ($SHORT_SHA); nothing to do"
   exit 0
 fi
@@ -340,6 +341,7 @@ done
 
 # --- Update .env.localnet.example in place. ---
 rewrite_env_file "$ROOT/.env.localnet.example"
+if [[ -f "$ROOT/.env.localnet" ]]; then rewrite_env_file "$ROOT/.env.localnet"; fi
 
 # --- Repin doc files, only when the tag actually changed. ---
 if [[ -n "$OLD_TAG" && "$OLD_TAG" != "$TAG" ]]; then

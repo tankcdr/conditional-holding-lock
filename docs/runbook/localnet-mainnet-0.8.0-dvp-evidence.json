@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-09-23T02:55:55.290512+00:00",
+  "checked_at": "2026-09-23T18:49:20.662043+00:00",
   "network_runtime": "localnet-mainnet",
   "execution": "CIP-0112 DvP between registries settled atomically in one transaction: a real Canton Coin (Amulet) payment leg against TestTokenV2 delivered under our conditional-lock interface, plus the expiry path returning the locked delivery when no alternative is satisfied.",
   "release": "unreleased",
-  "git_commit": "3d4f852983935eadd17a6cfcf961625ca83fcf84",
+  "git_commit": "567bfca4dcbef305b5ff13ecab1f1620c2537149",
   "git_dirty": true,
   "splice_version_reference": "0.8.1",
   "splice_source_ref": "0.8.1",
@@ -43,33 +43,33 @@
   "synchronizer_id": "global-domain::1220d6a5acd75c65a27bdff8cc03c69a576115c33507d69ace33847b2461c4927127",
   "settlements": [
     {
-      "lock_id": "dvp-12622683",
-      "update_id": "12203d62133448c6a8b3c438c922c920718f2315fc1ffc84606b9b7666d00cc56f54",
-      "effective_at": "2026-09-23T02:54:43.103969Z",
+      "lock_id": "dvp-85a50ba7",
+      "update_id": "122040ea8ea7cd27c6778b836ea1a2702b7d76d2315293494a5c7b9b96bed0d29cf6",
+      "effective_at": "2026-09-23T18:48:33.994098Z",
       "command_count": 2,
       "delivery": {
         "instrument_id": "TTKN",
         "amount": "100.0000000000",
         "package_name": "splice-test-token-v2",
-        "holding_contract_id": "00d38f77c394bee5da03d2d48ef25b0476a7416bd2c9279c51d812bf09d4a790a8ca121220c4c2d5c8da4fe0732c903b020935c4998bc67b844e7c9f628e5f424e9a87f45f",
+        "holding_contract_id": "00e7fa852a5395b9c908d2879a4d190f92c9ea83099796d03f5d4ae6db39802eb0ca1212202149563899e9e86db73a95f38393c6fc87497c03cd14322d5c4b18c4df27aa5e",
         "receiver": "app_user_conditionallock-localparty-1::1220d16dcd157e297fa0911df916861f082efcc5aecc42c811f1e3f3fdb9c05a2e85"
       },
       "payment": {
         "instrument_id": "Amulet",
         "amount": "42.0000000000",
         "package_name": "splice-amulet",
-        "holding_contract_id": "00375be5013c59de0fe7a5665836fa8a0f0b9e10586240e7f99d5202e02281177cca1212202d060929013adb44fb9035be30367c2a11888987d5e13b444b355cfa4c2b9217",
+        "holding_contract_id": "007ccea0aae7a277e357eb0bc8d526997b7f571a45dfa565c53340645b3f7ac776ca121220785cfdd31b8210f491e7400623a1deb70f9c7d849739c289b6ef1d89fb3134f5",
         "receiver": "app_provider_conditionallock-localparty-1::1220fa3afbf6958169845f9b4860588463d24b1bbbecf66f325875705c6c3c48a31d",
         "sender": "app_user_conditionallock-localparty-1::1220d16dcd157e297fa0911df916861f082efcc5aecc42c811f1e3f3fdb9c05a2e85"
       },
       "transfer_leg_ids": [
-        "dvp-12622683/settle/delivery"
+        "dvp-85a50ba7/settle/delivery"
       ],
       "amulet_allocation_cids": [
-        "0033a2e246c96dd0f402590dfb6cf05d785f8f43e696705fb59a7a91a22c254766ca12122099bfe4e5a86668283ebc23a28b91bcea78df376316910ba3bfa6086c5eb2b1f3",
-        "00a18a63b4d1221f5dc9fc96f6003f59ee784c90f241303a0e7987478d5ec7a90bca12122052bac6f54449f93bf8584ee2404389671158f87290237df3dae3a84a04b67efb"
+        "00592e3dd7c850e24737adc3b1986386dd5c34fdd645396ba1ba1350219db45a33ca1212205015e91d62ac5b42068988f5f41fa7214b27843c5ac539901b5e7847db9410e5",
+        "003cfe7655fb1dae982b583709147544fbcd472aa68a29a1e2a8ded961b3808ddaca1212207263f63cadb52b9e8659ed2b990611128275ff1f46283a4b8c91d8f6606d75c9"
       ],
-      "lock_contract_id": "00022b856cc17c81eeef99dc4afa299dae1846b07f0a43b28355bc2657893199a2ca1212205920e801d3f1f79297b7cd883eb79816eb30093d35c6a6d8130b895f6852f1bd",
+      "lock_contract_id": "00b84d41b447ff546aae1698746c26ad83940507a30b731cef93e7edc70c5fe97cca1212209a0d00861329c5290d7d4b16c7b46af25d5725ff4a44c51bfa6ed8d63811f1ee",
       "choices_exercised": [
         "SettlementFactory_SettleBatch",
         "Allocation_Settle",
@@ -77,15 +77,16 @@
       ]
     },
     {
-      "lock_id": "dvp-expiry-a1ae7b3c",
-      "deadline": "2026-09-23T02:55:09.394Z",
-      "expires_at": "2026-09-23T02:55:24.394Z",
-      "enact_rejected_at": "2026-09-23T02:55:12.409000Z",
-      "enact_rejection": "no alternative is satisfied",
-      "expire_update_id": "1220c198b80bad4b922d70f867857a985d2ed79f7f21393c4d19bee7cc3fe818044f",
-      "returned_contract_id": "001d845b6ebb20846a8e6028cf2ebcbc5646e0ce4777e0180d26b67d8fb70066ebca121220567b11c9b373d269dc46d0af94abe66c894b2ffe0932d408b9d030d6e827c334",
+      "lock_id": "dvp-expiry-541f0424",
+      "deadline": "2026-09-23T18:49:00.814Z",
+      "expires_at": "2026-09-23T18:49:15.814Z",
+      "enact_rejected_at": "2026-09-23T18:49:03.861000Z",
+      "enact_rejection": "POST http://localhost:3975/v2/commands/submit-and-wait-for-transaction -> 400\n{\"code\":\"DAML_FAILURE\",\"cause\":\"Interpretation error: Error: User failure: UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed (error category 9): no alternative is satisfied\",\"correlationId\":\"d4bca295-bf28-428b-9d2d-6ea73bddbd94\",\"traceId\":\"58eac4739b40efb7d76b7c8be3f1814d\",\"context\":{\"participant\":\"'app-provider'\",\"error_id\":\"UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed\",\"exercise_trace\":\"    in choice cc541d14:Splice.Api.Token.ConditionalLockV1:ConditionalLock:ConditionalLock_Enact on contract 00e581c37a (#0)\\n    in exercise command cc541d14:Splice.Api.Token.ConditionalLockV1:ConditionalLock:ConditionalLock_Enact on contract 00e581c37a.\\n\",\"category\":\"9\",\"tid\":\"58eac4739b40efb7d76b7c8be3f1814d\",\"definite_answer\":\"false\",\"commands\":\"{readAs: ['cl-registry::1220fa3afbf6958169845f9b4860588463d24b1bbbecf66f325875705c6c3c48a31d', 'app_provider_conditionallock-localparty-1::1220fa3afbf6958169845f9b4860588463d24b1bbbecf66f325875705c6c3c48a31d', 'app_user_conditionallock-localparty-1::1220d16dcd157e297fa0911df916861f082efcc5aecc42c811f1e3f3fdb9c05a2e85'], deduplicationPeriod: {duration: 'PT30S'}, submittedAt: '2026-09-23T18:49:03.827394Z', submissionId: 'd4bca295-bf28-428b-9d2d-6ea73bddbd94', actAs: ['cl-executor::1220fa3afbf6958169845f9b4860588463d24b1bbbecf66f325875705c6c3c48a31d'], commandId: 'integration-enact-attempt-daed484c-edbc-4a90-998b-a41bfa62cd13', userId: 'ledger-api-user', workflowId: }\"},\"resources\":[],\"errorCategory\":9,\"grpcCodeValue\":9,\"retryInfo\":null,\"definiteAnswer\":null}",
+      "expire_update_id": "12202ea86f72f42ee73454bd870fd38bdb5ef64f806dc01678fb59ab6080ccd6a6b4",
+      "returned_contract_id": "00ff5a623ae4539ac66274ab74bdba9f99343607f2952af5b5ce11fc25f40dfc4dca121220064ccaf1a0f57c9f4e4e34a6e26945ec57adad40cb51ce19626e4020f0090f6f",
+      "returned_owner": "app_provider_conditionallock-localparty-1::1220fa3afbf6958169845f9b4860588463d24b1bbbecf66f325875705c6c3c48a31d",
       "returned_amount": "100.0000000000",
-      "amulet_allocation_withdrawn_cid": "00ff2b0789f1368a30dc6da916b61153fd05a1e38d6a4c26dbcde6bb15e5989f8eca12122092b01bdee8e019ffbcaadb1f17c9e17f1fb262fbfb369d4bf8e3093a7e321d98"
+      "amulet_allocation_withdrawn_cid": "00d608197144aa5110e20f6fefa6855a255f173c886bd33bef871d1bbaf56c16afca1212204f61fd5505193ee5981f0887c7e80a1fcf9896688d0031734214d8715a66ca3d"
     }
   ],
   "update_id_source": "the JSON Ledger API v2 submit-and-wait-for-transaction response; unlike the escrowed-DvP reference path (which runs through Daml Script and cannot return ledger update IDs, see UPDATE_ID_FALLBACK), this harness submits directly and records the update ID the ledger returned. The recorded IDs are then cross-checked: the harness independently re-read each update from the participant's own /v2/updates/update-by-id after the fact (settlement-update.json, expire-update.json), and this file rejects the evidence unless the IDs, timestamps, synchronizer, root choices, and transfer amounts in those raw responses agree with what is claimed here",
@@ -94,7 +95,7 @@
       "ConditionalLock_Enact",
       "SettlementFactory_SettleBatch"
     ],
-    "settlement_update_id_recorded": "12203d62133448c6a8b3c438c922c920718f2315fc1ffc84606b9b7666d00cc56f54",
-    "expire_update_id_recorded": "1220c198b80bad4b922d70f867857a985d2ed79f7f21393c4d19bee7cc3fe818044f"
+    "settlement_update_id_recorded": "122040ea8ea7cd27c6778b836ea1a2702b7d76d2315293494a5c7b9b96bed0d29cf6",
+    "expire_update_id_recorded": "12202ea86f72f42ee73454bd870fd38bdb5ef64f806dc01678fb59ab6080ccd6a6b4"
   }
 }

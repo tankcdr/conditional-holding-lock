@@ -55,7 +55,7 @@ localnet_env() {
   . "$_ROOT/.env.localnet"
   set +a
 
-  : "${IMAGE_TAG:?.env.localnet must set IMAGE_TAG (the Splice release tag)}"
+  : "${IMAGE_TAG:?.env.localnet has no IMAGE_TAG (the Splice release tag); it predates the Splice compose stack. Run ./scripts/localnet-sync.sh to repair it in place, or delete it and rerun}"
   : "${PARTY_HINT:?.env.localnet must set PARTY_HINT}"
 
   # compose.yaml's volume sources are ${LOCALNET_DIR}/... and are resolved

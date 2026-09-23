@@ -377,9 +377,11 @@ describe("expiry: the deadline passes before the counterparty acts", () => {
           deadline: echoedTerms.rules[0].anyOf[0].allOf[1].value.time,
           expires_at: echoedTerms.expiresAt,
           enact_rejected_at: rejectedAt,
-          enact_rejection: "no alternative is satisfied",
+          // The ledger's own error text, as the JSON API returned it, not a constant.
+          enact_rejection: rejection,
           expire_update_id: expireTx.updateId,
           returned_contract_id: returned!.contractId,
+          returned_owner: returned!.createArgument.holding.account.owner,
           returned_amount: returned!.createArgument.holding.amount,
           amulet_allocation_withdrawn_cid: allocationCid,
         };

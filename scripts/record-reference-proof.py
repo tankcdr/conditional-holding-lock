@@ -554,12 +554,21 @@ def record_dvp(args):
             f"after the deadline or the run does not show the guard doing anything"
         )
 
-    # Gate 12: the rejection reason names the guard that fired.
+    # Gate 12: the rejection reason names the guard that fired, and it is the
+    # ledger's own error as the harness's JSON API client formats it
+    # ("<METHOD> <url> -> <status>\n<body>"), not a constant typed into the run
+    # file. A bare phrase with no HTTP status line is rejected.
     enact_rejection = expiry.get("enact_rejection") or ""
     if "no alternative is satisfied" not in enact_rejection:
         raise SystemExit(
             f"{dvp_run_path}: expiry.enact_rejection = {enact_rejection!r} does not contain "
             f"'no alternative is satisfied'; the run does not show the expected guard rejection"
+        )
+    if not re.match(r"^POST \S+/v2/commands/\S+ -> [45]\d\d\n", enact_rejection):
+        raise SystemExit(
+            f"{dvp_run_path}: expiry.enact_rejection does not start with the JSON API client's "
+            f"'POST <url> -> <4xx|5xx>' status line; the recorded text must be the ledger's "
+            f"rejection as observed, not a hand-written phrase"
         )
 
     # Gate 13: the expiry path returns the same locked amount it would have delivered.
@@ -959,6 +968,24 @@ def record_dvp(args):
             f"{expire_update_path}: the returned holding's owner = {returned_owner!r} equals "
             f"settlement.delivery.receiver; the expiry path must return the contract to the "
             f"delivery's authorizer side, not to the delivery receiver"
+        )
+    # The returned holding must go back to the seller: the run file's claimed owner,
+    # the expire update's own CreatedEvent owner, parties.alice, and the delivery
+    # leg's SenderSide owner from the settlement update (gate 19b) must all agree.
+    # Any other recipient, a third party included, fails here.
+    claimed_owner = expiry.get("returned_owner")
+    if not claimed_owner:
+        raise SystemExit(f"{dvp_run_path}: expiry.returned_owner is missing")
+    if returned_owner != claimed_owner:
+        raise SystemExit(
+            f"{expire_update_path}: the returned holding's owner = {returned_owner!r} does not "
+            f"equal expiry.returned_owner = {claimed_owner!r} in {dvp_run_path}"
+        )
+    if returned_owner != parties.get("alice") or returned_owner != delivery_authorizer:
+        raise SystemExit(
+            f"{expire_update_path}: the returned holding's owner = {returned_owner!r} must equal "
+            f"parties.alice = {parties.get('alice')!r} and the delivery leg's SenderSide owner = "
+            f"{delivery_authorizer!r}; the expiry path did not return the funds to the seller"
         )
     if returned_holding.get("amount") != expiry.get("returned_amount"):
         raise SystemExit(
