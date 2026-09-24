@@ -9,7 +9,7 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 . "$ROOT/scripts/lib/java.sh"
 conditional_lock_java
 
-PINNED_INTERFACE_ID="ed3faf9fa8b9bd68789715451c133695acada4247c3e57709268a5dc0b2b5e61"
+PINNED_INTERFACE_ID="ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e"
 
 package_list="$(python3 -c "
 import sys
@@ -54,7 +54,7 @@ fi
 
 interface_id="$(awk -v pkg="splice-api-token-conditional-lock-v1" '$1 == pkg { print $2 }' "$second/ids.txt")"
 if [[ "$interface_id" != "$PINNED_INTERFACE_ID" ]]; then
-  echo "splice-api-token-conditional-lock-v1 package ID is $interface_id, expected pinned $PINNED_INTERFACE_ID (see daml/dars.lock on the proposed Splice branch, PR 7294); it must never change." >&2
+  echo "splice-api-token-conditional-lock-v1 package ID is $interface_id, expected pinned $PINNED_INTERFACE_ID (see daml/dars.lock on the proposed Splice branch, PR 7294); it changes only with a deliberate interface revision, which must update both pins." >&2
   exit 1
 fi
 

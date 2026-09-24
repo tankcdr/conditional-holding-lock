@@ -23,7 +23,7 @@ The published DAR dependencies come from Splice release tag [`0.8.1`](https://gi
 
 ## Executable proofs
 
-**Result: PASS.** All 72 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.16 and 3.5.17. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
+**Result: PASS.** All 94 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.16 and 3.5.17. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
 
 Run from the repository root:
 
@@ -33,7 +33,7 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The normal suite has 72 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples, the eleven `TestPolicyLimits` policy-limit proofs, and the on-ledger preimage-count proof. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
+The normal suite has 94 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples, the eleven `TestPolicyLimits` policy-limit proofs, and the on-ledger preimage-count proof. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
@@ -47,11 +47,11 @@ The normal suite has 72 Daml Scripts, two Solidity tests, and three Solana SBF t
 | Every validator reads its bounds from its `Limits` argument | `TestPolicyLimits:test_pureValidatorsReadBoundsFromTheirArgument`, `test_legValidatorsReadBoundsFromTheirArgument`, `test_validateTermsReadsBoundsFromItsArgument`; each bound is exercised both below and above the reference value of 8, so reverting any validator to a literal fails |
 | The witness preimage bound is enforced on a live lock | `TestRegistryLimits:test_preimageCountAtTheLimitIsAcceptedAndOverTheLimitRejected`; the over-limit witness still carries the correct preimage |
 
-Additional proofs cover account-provider acceptance, sequential acceptance by multiple receivers, controller spoofing and duplicate threshold actors, rule consumption, conservation across partial releases and top-ups, bounded release, exact expiry, pending withdrawal, rejection, unanimous cancellation and amendment, prevention of spent-rule resurrection, malformed funding and terms and preimages, Keccak enactment, expired backing not spendable by the ordinary token path, both sides of V2 event reporting, two-alternative single firing, expiry always unlocking to the authorizer, combined fixed and enactor-supplied release legs, release and leg validation at creation and at amendment, leg identifier distinctness within and across locks, non-empty and forward-slash-free rule, leg, and lock identifiers, leg metadata on both transfer leg sides and reserved-key rejection, instruction and lock availableActions, authorizer-provider authorization at lock creation, the lock's signatory set, the rejection of enactor-supplied legs on an unlock, the eight advertised registry limits at and over each bound, and the enact and expire choice-observer functions.
+Additional proofs cover account-provider acceptance, sequential acceptance by multiple receivers, controller spoofing and duplicate threshold actors, rule consumption, conservation across partial releases and top-ups, bounded release, exact expiry, pending withdrawal, rejection, unanimous cancellation and amendment, prevention of spent-rule resurrection, malformed funding and terms and preimages, Keccak enactment, expired backing not spendable by the ordinary token path, both sides of V2 event reporting, two-alternative single firing, expiry always unlocking to the authorizer, combined fixed and enactor-supplied release legs, release and leg validation at creation and at amendment, leg identifier distinctness within and across locks, non-empty and forward-slash-free rule, leg, and lock identifiers, leg metadata on both transfer leg sides and reserved-key rejection, instruction and lock availableActions, authorizer-provider authorization at lock creation, the lock's signatory set, the rejection of enactor-supplied legs on an unlock, the eight advertised registry limits at and over each bound, and the enact, approve, and expire choice-observer functions.
 
 ### DvP between registries, against real Canton Coin
 
-The 72-script suite settles two TestTokenV2 registries against each other, which proves the mechanics but not the integration. `pnpm test:integration` runs the same CIP-0112 section 4 example on the Mainnet-configuration localnet with a real counter-asset: TestTokenV2 locked under the conditional lock as the delivery leg, and **real Amulet** as the payment leg.
+The 94-script suite settles two TestTokenV2 registries against each other, which proves the mechanics but not the integration. `pnpm test:integration` runs the same CIP-0112 section 4 example on the Mainnet-configuration localnet with a real counter-asset: TestTokenV2 locked under the conditional lock as the delivery leg, and **real Amulet** as the payment leg.
 
 Both legs settle in one transaction. The executor submits two commands in a single `submit-and-wait-for-transaction` — `SettlementFactory_SettleBatch` on Splice's `ExternalPartyAmuletRules`, and `ConditionalLock_Enact` on the active lock — so the ledger records one update with two root nodes, one per leg. That is the atomicity claim, and it is checked against the participant's own re-read of the update rather than against what the harness submitted: the evidence gate recomputes the root nodes from `nodeId`/`lastDescendantNodeId` containment and refuses evidence that does not show exactly two.
 
@@ -70,7 +70,8 @@ Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedE
 | Arbiter escrow | `test_example_arbiterEscrow` | release bounds, multiple receivers, expiry refund |
 | Vesting | `test_example_vesting` | partial release conservation, spent-rule resurrection, guard boundaries (inclusive After, exclusive Before) |
 | Collateral | `test_example_collateral` | unlock without acceptance, amend top-up, amend cannot change asset |
-| Conditional payment | `test_example_conditionalPayment` | alternatives and guard boundaries (inclusive After, exclusive Before), enactor and threshold |
+| Conditional payment | `test_example_conditionalPayment` | alternatives and guard boundaries (inclusive After, exclusive Before), attestor approval recorded by `ConditionalLock_Approve` then payee enactment |
+| Escrowed DvP, venue form | `test_example_dvpVenueEnactsApprovedSettle` | sequential approvals on both locks, counterparty cannot enact alone, venue enacts both in one transaction |
 
 `test_example_dvpBetweenRegistries` exercises only the `settle` rule of the CIP's escrowed-DvP example: a two-party `Guard_Parties` guard enacted atomically across two registries, plus its rollback and threshold-spoofing failure paths. It does not exercise a dispute window, an arbiter, or the `award` rule. The full example, including the `award` path after the deadline, is exercised by [`examples/devnet-escrow/daml/EscrowedDvpDevNet.daml`](../../examples/devnet-escrow/daml/EscrowedDvpDevNet.daml) against a real wall-clock ledger; see [adoption-evidence.md](../adoption-evidence.md).
 
@@ -131,7 +132,7 @@ Two narrow corrections are included in the CIP:
 
 ## Scope of the compatibility claim
 
-The proofs establish compilation and execution of these Daml contracts on the current network runtime versions. The 72-script suite's topology is one participant and one synchronizer with controlled ledger time.
+The proofs establish compilation and execution of these Daml contracts on the current network runtime versions. The 94-script suite's topology is one participant and one synchronizer with controlled ledger time.
 
 The DvP integration test (`pnpm test:integration`) extends that in three specific directions, and the scope statement has to be read against it. It runs on the Mainnet-configuration localnet across **two participants** under **wall-clock** time: the seller and the registry admin on app-provider, the buyer on app-user, with the buyer approving the lock on his own participant and the settlement confirmed across both. It is therefore a **multi-participant** proof, not a single-participant one. It also exercises **Splice wallet and registry integration** directly — the validator wallet API for the tap, the balance, and the V2 Amulet allocations, and scan's `/registry/allocation/v2/settlement-factory` for the settlement factory and its choice context.
 

@@ -1,0 +1,474 @@
+-- Copyright (c) 2026 Long Run Advisory. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+module TestRuleApprovals where
+
+import DA.Assert
+import DA.List (dedup)
+import DA.Map qualified as Map
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.ConditionalLockV1 qualified as CL
+import ConditionalLock.Policy
+import ConditionalLock.TestToken qualified as Impl
+import TestConditionalLock
+
+-- Tests of `ConditionalLock_Approve` and `ConditionalLockView.approvals`
+-- (CIP-TBD section 3.3, `ConditionalLockV1.Approval`).
+
+-- CIP-TBD section 3.3/3.5: a 2-of-3 `Guard_Parties` threshold is met one
+-- approval at a time; the entitled enactor (outside the guard) then acts
+-- alone, its actors joined with the recorded approvers.
+test_sequentialTwoOfThreeApproval : Script ()
+test_sequentialTwoOfThreeApproval = do
+  e <- setup ()
+  let guardParties = [e.bob, e.charlie, e.arbiter]
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.provider] (alt (CL.Guard_Parties guardParties 2))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+
+  approvedByBob <- submit e.bob $ exerciseCmd cid1 $ approveArg "release" [] [e.bob]
+  (cid2, _) <- asLocked approvedByBob
+  Some viewAfterBob <- queryInterfaceContractId e.alice cid2
+  viewAfterBob.approvals === [CL.Approval "release" [] [e.bob]]
+
+  -- One approval is not enough to meet the 2-of-3 threshold.
+  failsBecause (actAs [e.provider] <> readAs [e.alice]) "no alternative is satisfied" $
+    exerciseCmd cid2 $ enactArg "release" [e.provider]
+
+  approvedByCharlie <- submit e.charlie $ exerciseCmd cid2 $ approveArg "release" [] [e.charlie]
+  (cid3, _) <- asLocked approvedByCharlie
+  Some viewAfterCharlie <- queryInterfaceContractId e.alice cid3
+  viewAfterCharlie.approvals === [CL.Approval "release" [] [e.bob, e.charlie]]
+
+  result <- submit (actAs [e.provider] <> readAs [e.alice]) $ exerciseCmd cid3 $ enactArg "release" [e.provider]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected full release once the threshold was met by approval"
+
+-- CIP-TBD section 3.3/3.5: an attestor approves from its own wallet, and the
+-- entitled enactor enacts alone, later, relying on that recorded approval.
+test_attestorApprovesPayeeEnactsLater : Script ()
+test_attestorApprovesPayeeEnactsLater = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.bob] (alt (CL.Guard_Parties [e.arbiter] 1))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  approved <- submit e.arbiter $ exerciseCmd cid1 $ approveArg "release" [] [e.arbiter]
+  (cid2, _) <- asLocked approved
+  result <- submit e.bob $ exerciseCmd cid2 $ enactArg "release" [e.bob]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected the payee's solo enactment to succeed on the attestor's approval"
+
+-- CIP-TBD section 3.3: an approval is recorded for exactly one `(ruleId,
+-- legs)`; enacting with different enactor-supplied legs cannot use it.
+test_approvalDoesNotCountForDifferentLegs : Script ()
+test_approvalDoesNotCountForDifferentLegs = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.bob, e.charlie] 2))
+          (CL.Outcome_Release [] [account e.bob, account e.charlie])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  let legsA = [CL.Leg "a" (account e.bob) 100.0 emptyMetadata]
+  let legsB = [CL.Leg "b" (account e.bob) 100.0 emptyMetadata]
+
+  approvedByBob <- submit e.bob $ exerciseCmd cid1 $ approveArg "award" legsA [e.bob]
+  (cid2, _) <- asLocked approvedByBob
+  approvedByCharlie <- submit e.charlie $ exerciseCmd cid2 $ approveArg "award" legsA [e.charlie]
+  (cid3, _) <- asLocked approvedByCharlie
+  Some view <- queryInterfaceContractId e.alice cid3
+  view.approvals === [CL.Approval "award" legsA [e.bob, e.charlie]]
+
+  -- The approvals were recorded for `legsA`; they do not count for `legsB`.
+  failsBecause (actAs [e.arbiter] <> readAs [e.alice]) "no alternative is satisfied" $
+    exerciseCmd cid3 $ (enactArg "award" [e.arbiter]) with legs = legsB
+
+  -- Positive control differing only in the legs, which match the approval.
+  result <- submit e.arbiter $ exerciseCmd cid3 $ (enactArg "award" [e.arbiter]) with legs = legsA
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected release for the legs the approval was recorded for"
+
+-- CIP-TBD section 3.3: only a party in the rule's `enactors` or in one of its
+-- `Guard_Parties` can approve it.
+test_approveByUnnamedPartyFails : Script ()
+test_approveByUnnamedPartyFails = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  failsBecause (actAs [e.charlie] <> readAs [e.alice]) "no actor can approve this rule" $
+    exerciseCmd cid $ approveArg "release" [] [e.charlie]
+
+-- CIP-TBD section 3.3: an approval cannot be recorded at or after expiry.
+test_approveAtOrAfterExpiryFails : Script ()
+test_approveAtOrAfterExpiryFails = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  setTime terms.expiresAt
+  failsBecause (actAs [e.arbiter]) "cannot approve at or after expiry" $
+    exerciseCmd cid $ approveArg "release" [] [e.arbiter]
+
+-- CIP-TBD section 3.3: `ConditionalLock_Amend` clears every recorded approval.
+test_amendClearsApprovals : Script ()
+test_amendClearsApprovals = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter, e.charlie] 2))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  approved <- submit e.charlie $ exerciseCmd cid1 $ approveArg "release" [] [e.charlie]
+  (cid2, _) <- asLocked approved
+  Some viewBeforeAmend <- queryInterfaceContractId e.alice cid2
+  viewBeforeAmend.approvals === [CL.Approval "release" [] [e.charlie]]
+
+  let amendActors = dedup (accountParties terms.authorizer <> namedParties terms)
+  amended <- submit (actAs amendActors) $ exerciseCmd cid2 $ CL.ConditionalLock_Amend terms [] amendActors extra
+  (cid3, _) <- asLocked amended
+  Some viewAfterAmend <- queryInterfaceContractId e.alice cid3
+  viewAfterAmend.approvals === []
+
+  -- The cleared approval is gone: the enactor alone can no longer meet the
+  -- threshold without re-approval.
+  failsBecause (actAs [e.arbiter] <> readAs [e.alice]) "no alternative is satisfied" $
+    exerciseCmd cid3 $ enactArg "release" [e.arbiter]
+
+-- CIP-TBD section 3.3: approvals of a rule still in `terms.rules` survive a
+-- continuation created when a different rule fires.
+test_approvalsOfUnfiredRuleSurviveContinuation : Script ()
+test_approvalsOfUnfiredRuleSurviveContinuation = do
+  e <- setup ()
+  let ruleA = CL.Rule "partial" [e.bob] (alt (CL.Guard_Parties [e.bob] 1))
+        (CL.Outcome_Release [CL.Leg "partial" (account e.bob) 30.0 emptyMetadata] [])
+  let ruleB = CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter, e.charlie] 2))
+        (CL.Outcome_Release [CL.Leg "payout" (account e.charlie) 70.0 emptyMetadata] [])
+  let terms = (termsFor e) with rules = [ruleA, ruleB]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+
+  approved <- submit e.charlie $ exerciseCmd cid1 $ approveArg "release" [] [e.charlie]
+  (cid2, _) <- asLocked approved
+  Some viewBeforeFire <- queryInterfaceContractId e.alice cid2
+  viewBeforeFire.approvals === [CL.Approval "release" [] [e.charlie]]
+
+  result <- submit e.bob $ exerciseCmd cid2 $ enactArg "partial" [e.bob]
+  next <- case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some continuationCid) -> do
+      assertToken e.bob out (account e.bob) terms.instrumentId 30.0
+      pure continuationCid
+    _ -> abort "expected a partial release with a continuation"
+  Some continuationView <- queryInterfaceContractId e.alice next
+  continuationView.approvals === [CL.Approval "release" [] [e.charlie]]
+
+  -- The surviving approval lets the arbiter alone meet the 2-of-2 threshold.
+  finalResult <- submit e.arbiter $ exerciseCmd next $ enactArg "release" [e.arbiter]
+  case finalResult.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.charlie out (account e.charlie) terms.instrumentId 70.0
+    _ -> abort "expected the remaining release to be enacted with the surviving approval"
+
+-- CIP-TBD section 3.3: registries drop the approvals of a rule once it fires.
+test_firedRuleApprovalsAreDropped : Script ()
+test_firedRuleApprovalsAreDropped = do
+  e <- setup ()
+  let ruleA = CL.Rule "release-a" [e.bob] (alt (CL.Guard_Parties [e.bob] 1))
+        (CL.Outcome_Release [] [account e.charlie])
+  let ruleB = CL.Rule "release-b" [e.arbiter] (alt (CL.Guard_Parties [e.charlie] 1))
+        (CL.Outcome_Release [CL.Leg "b" (account e.bob) 20.0 emptyMetadata] [])
+  let terms = (termsFor e) with rules = [ruleA, ruleB]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  let legsA = [CL.Leg "a" (account e.charlie) 40.0 emptyMetadata]
+
+  approvedA <- submit e.bob $ exerciseCmd cid1 $ approveArg "release-a" legsA [e.bob]
+  (cid2, _) <- asLocked approvedA
+  approvedB <- submit e.charlie $ exerciseCmd cid2 $ approveArg "release-b" [] [e.charlie]
+  (cid3, _) <- asLocked approvedB
+  Some viewBeforeFire <- queryInterfaceContractId e.alice cid3
+  viewBeforeFire.approvals === [CL.Approval "release-a" legsA [e.bob], CL.Approval "release-b" [] [e.charlie]]
+
+  result <- submit e.bob $ exerciseCmd cid3 $ (enactArg "release-a" [e.bob]) with legs = legsA
+  next <- case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] (Some continuationCid) -> do
+      assertToken e.charlie out (account e.charlie) terms.instrumentId 40.0
+      pure continuationCid
+    _ -> abort "expected release-a to fire with a continuation"
+  Some continuationView <- queryInterfaceContractId e.alice next
+  continuationView.approvals === [CL.Approval "release-b" [] [e.charlie]]
+
+-- CIP-TBD section 3.6/3.3: an approval's legs are validated the same way
+-- `ConditionalLock_Enact.legs` are.
+test_approveLegsValidatedLikeEnact : Script ()
+test_approveLegsValidatedLikeEnact = do
+  e <- setup ()
+  let base = termsFor e
+  let unlockRule = CL.Rule "unlock" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock
+  let terms = base with rules = base.rules <> [unlockRule]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  failsBecause (actAs [e.arbiter]) "enactor-supplied legs require a non-empty receiver set" $
+    exerciseCmd cid $ approveArg "release" [CL.Leg "x" (account e.charlie) 1.0 emptyMetadata] [e.arbiter]
+  failsBecause (actAs [e.arbiter]) "an unlock admits no enactor-supplied legs" $
+    exerciseCmd cid $ approveArg "unlock" [CL.Leg "x" (account e.charlie) 1.0 emptyMetadata] [e.arbiter]
+
+-- CIP-TBD section 3.3: an unknown or already-enacted rule ID cannot be approved.
+test_approveUnknownRuleIdFails : Script ()
+test_approveUnknownRuleIdFails = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  failsBecause (actAs [e.arbiter]) "unknown or already enacted rule" $
+    exerciseCmd cid $ approveArg "no-such-rule" [] [e.arbiter]
+
+  -- The same rejection covers an already-fired rule ID on a continuation: the
+  -- ID is no longer in `terms.rules` once it has fired, the same total case
+  -- as one that was never there.
+  let ruleA = CL.Rule "partial" [e.bob] (alt (CL.Guard_Parties [e.bob] 1))
+        (CL.Outcome_Release [CL.Leg "partial" (account e.bob) 30.0 emptyMetadata] [])
+  let ruleB = CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter, e.charlie] 2))
+        (CL.Outcome_Release [CL.Leg "payout" (account e.charlie) 70.0 emptyMetadata] [])
+  let continuationTerms = (termsFor e) with rules = [ruleA, ruleB]
+  (cid2, _) <- lock e.rulesA continuationTerms [e.alice, e.bob, e.charlie] >>= asLocked
+  result <- submit e.bob $ exerciseCmd cid2 $ enactArg "partial" [e.bob]
+  next <- case result.output of
+    CL.ConditionalLockResult_Enacted [_] [] (Some continuationCid) -> pure continuationCid
+    _ -> abort "expected a partial release with a continuation"
+  -- The arbiter is named on the continuation as an enactor of "release", so
+  -- this submission fails in the choice body, not on visibility.
+  failsBecause (actAs [e.arbiter]) "unknown or already enacted rule" $
+    exerciseCmd next $ approveArg "partial" [] [e.arbiter]
+
+-- CIP-TBD section 3.3: approving the same `(ruleId, legs)` again is a set
+-- union of approvers, not a new entry; a party that has already approved
+-- these legs records nobody new, so a bare re-approval by the same party
+-- fails rather than silently succeeding again.
+test_reapprovalIsASetUnion : Script ()
+test_reapprovalIsASetUnion = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter, e.charlie] 2))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+
+  firstApproval <- submit e.arbiter $ exerciseCmd cid1 $ approveArg "release" [] [e.arbiter]
+  (cid2, _) <- asLocked firstApproval
+  Some viewAfterFirstApproval <- queryInterfaceContractId e.alice cid2
+  viewAfterFirstApproval.approvals === [CL.Approval "release" [] [e.arbiter]]
+
+  failsBecause (actAs [e.arbiter]) "every approver has already approved these legs" $
+    exerciseCmd cid2 $ approveArg "release" [] [e.arbiter]
+
+  thirdApproval <- submit e.charlie $ exerciseCmd cid2 $ approveArg "release" [] [e.charlie]
+  (cid4, _) <- asLocked thirdApproval
+  Some viewAfterSecondApprover <- queryInterfaceContractId e.alice cid4
+  viewAfterSecondApprover.approvals === [CL.Approval "release" [] [e.arbiter, e.charlie]]
+
+-- CIP-TBD section 3.3: `CLA_Approve` lists one singleton group per party of
+-- `approvalParties rule`, only for a rule with a `Guard_Parties`.
+test_availableActionsApproveEntries : Script ()
+test_availableActionsApproveEntries = do
+  e <- setup ()
+  let withGuard = CL.Rule "g" [e.arbiter, e.charlie] (alt (CL.Guard_Parties [e.bob] 1)) CL.Outcome_Unlock
+  let withoutGuard = CL.Rule "f" [e.arbiter] (alt (CL.Guard_After (e.now `addRelTime` days 2))) CL.Outcome_Unlock
+  let terms = (termsFor e) with rules = [withGuard, withoutGuard]
+  (cid, _) <- lock e.rulesA terms [e.alice] >>= asLocked
+  Some view <- queryInterfaceContractId e.alice cid
+  Map.lookup (CL.CLA_Approve "g") view.availableActions === Some [[e.arbiter], [e.charlie], [e.bob]]
+  Map.lookup (CL.CLA_Approve "f") view.availableActions === None
+
+-- CIP-TBD section 3.3/3.4: an approval carries no new backing holding and
+-- archives the prior active lock, replacing it under the same `lockId`.
+test_approveDoesNotCreateNewBackingHolding : Script ()
+test_approveDoesNotCreateNewBackingHolding = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid1, holding) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  Some viewBefore <- queryInterfaceContractId e.alice cid1
+  viewBefore.holdingCids === [holding]
+
+  result <- submit e.arbiter $ exerciseCmd cid1 $ approveArg "release" [] [e.arbiter]
+  case result.output of
+    CL.ConditionalLockResult_Locked _ holdingCids -> holdingCids === [holding]
+    _ -> abort "expected Locked"
+  queryContractId e.alice (coerceContractId cid1 : ContractId Impl.ActiveLock) >>= (=== None)
+
+-- CIP-TBD Security Considerations, "Recorded approvals": an approval is
+-- unconditional consent to any future enactment of the approved `(ruleId,
+-- legs)`, not consent tied to a co-signer or a particular transaction. Once
+-- Alice approves, Bob alone can later enact the rule without Alice acting,
+-- or being asked, again.
+test_approvalIsUnconditionalConsent : Script ()
+test_approvalIsUnconditionalConsent = do
+  e <- setup ()
+  let actors = [e.alice, e.bob]
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" actors (alt (CL.Guard_Parties actors 2))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid1, _) <- lock e.rulesA terms actors >>= asLocked
+  approved <- submit e.alice $ exerciseCmd cid1 $ approveArg "release" [] [e.alice]
+  (cid2, _) <- asLocked approved
+  result <- submit e.bob $ exerciseCmd cid2 $ enactArg "release" [e.bob]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected Bob's solo enactment to succeed on Alice's recorded approval alone"
+
+-- CIP-TBD section 3.3: a rule with no `Guard_Parties` in any alternative
+-- cannot be approved: there is no guard threshold an approval could help
+-- satisfy.
+test_approveRuleWithoutGuardPartiesFails : Script ()
+test_approveRuleWithoutGuardPartiesFails = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules =
+          [ CL.Rule "release" [e.arbiter] (alt (CL.Guard_After e.now))
+              (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])
+          , CL.Rule "hashed" [e.arbiter] (alt (CL.Guard_Preimage CL.Sha256 zeroSha))
+              (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] []) ]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  failsBecause (actAs [e.arbiter]) "the rule has no Guard_Parties to approve" $
+    exerciseCmd cid $ approveArg "release" [] [e.arbiter]
+  failsBecause (actAs [e.arbiter]) "the rule has no Guard_Parties to approve" $
+    exerciseCmd cid $ approveArg "hashed" [] [e.arbiter]
+
+-- CIP-TBD section 3.3: a party approves at most one list of legs per rule;
+-- having approved one leg set, it cannot also approve a different one for
+-- the same rule.
+test_approverCannotApproveDifferentLegsForSameRule : Script ()
+test_approverCannotApproveDifferentLegsForSameRule = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.bob, e.charlie] 2))
+          (CL.Outcome_Release [] [account e.bob, account e.charlie])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  let legsA = [CL.Leg "a" (account e.bob) 100.0 emptyMetadata]
+  let legsB = [CL.Leg "b" (account e.bob) 100.0 emptyMetadata]
+  approved <- submit e.bob $ exerciseCmd cid1 $ approveArg "award" legsA [e.bob]
+  (cid2, _) <- asLocked approved
+  failsBecause (actAs [e.bob]) "an approver has already approved other legs for this rule" $
+    exerciseCmd cid2 $ approveArg "award" legsB [e.bob]
+
+-- CIP-TBD section 3.3: approved legs are compared as an ordered list, so an
+-- approval does not count for the same legs supplied to `Enact` in a
+-- different order.
+test_enactWithReorderedApprovedLegsFails : Script ()
+test_enactWithReorderedApprovedLegsFails = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.bob, e.charlie] 2))
+          (CL.Outcome_Release [] [account e.bob, account e.charlie])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob, e.charlie] >>= asLocked
+  let legA = CL.Leg "a" (account e.bob) 60.0 emptyMetadata
+  let legB = CL.Leg "b" (account e.charlie) 40.0 emptyMetadata
+  let legs = [legA, legB]
+  let reordered = [legB, legA]
+  approvedByBob <- submit e.bob $ exerciseCmd cid1 $ approveArg "award" legs [e.bob]
+  (cid2, _) <- asLocked approvedByBob
+  approvedByCharlie <- submit e.charlie $ exerciseCmd cid2 $ approveArg "award" legs [e.charlie]
+  (cid3, _) <- asLocked approvedByCharlie
+
+  failsBecause (actAs [e.arbiter] <> readAs [e.alice]) "no alternative is satisfied" $
+    exerciseCmd cid3 $ (enactArg "award" [e.arbiter]) with legs = reordered
+
+  result <- submit e.arbiter $ exerciseCmd cid3 $ (enactArg "award" [e.arbiter]) with legs = legs
+  case result.output of
+    CL.ConditionalLockResult_Enacted [b, c] [] None -> do
+      assertToken e.bob b (account e.bob) terms.instrumentId 60.0
+      assertToken e.charlie c (account e.charlie) terms.instrumentId 40.0
+    _ -> abort "expected release for the legs in the approved order"
+
+-- CIP-TBD section 3.3/3.6: an approval survives a continuation, but the
+-- continuation's reduced remaining amount can leave the approved legs no
+-- longer funded; `Enact` re-validates the legs against the current terms.
+-- The approval is not incidental here: "award" needs a 2-of-2 `Guard_Parties`
+-- threshold over [arbiter, charlie] that only charlie's recorded approval,
+-- joined with the arbiter's own act, can meet, so the enactment that fails on
+-- funding is one that would otherwise have gone on to satisfy its guard.
+test_approvedLegsCanBeUnfundedAfterAContinuationShrinksTheAmount : Script ()
+test_approvedLegsCanBeUnfundedAfterAContinuationShrinksTheAmount = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules =
+          [ CL.Rule "partial" [e.bob] (alt (CL.Guard_Parties [e.bob] 1))
+              (CL.Outcome_Release [CL.Leg "partial" (account e.bob) 80.0 emptyMetadata] [])
+          , CL.Rule "award" [e.arbiter] (alt (CL.Guard_Parties [e.arbiter, e.charlie] 2))
+              (CL.Outcome_Release [] [account e.bob]) ]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  let awardLegs = [CL.Leg "award" (account e.bob) 50.0 emptyMetadata]
+
+  -- Before any approval, the arbiter alone cannot meet the 2-of-2 threshold:
+  -- the approval this test adds is what will later let enactment reach the
+  -- funding check at all.
+  failsBecause (actAs [e.arbiter]) "no alternative is satisfied" $
+    exerciseCmd cid1 $ (enactArg "award" [e.arbiter]) with legs = awardLegs
+
+  -- Approved while the full 100.0 remains: well within bounds at approval time.
+  approved <- submit e.charlie $ exerciseCmd cid1 $ approveArg "award" awardLegs [e.charlie]
+  (cid2, _) <- asLocked approved
+
+  -- "partial" fires first, consuming 80.0 and leaving only 20.0.
+  result <- submit e.bob $ exerciseCmd cid2 $ enactArg "partial" [e.bob]
+  next <- case result.output of
+    CL.ConditionalLockResult_Enacted [_] [] (Some continuationCid) -> pure continuationCid
+    _ -> abort "expected a partial release with a continuation"
+
+  -- The approval survives the continuation.
+  Some continuationView <- queryInterfaceContractId e.alice next
+  continuationView.approvals === [CL.Approval "award" awardLegs [e.charlie]]
+
+  -- The surviving approval, joined with the arbiter's own act, meets the
+  -- 2-of-2 threshold: `satisfied` passes and enactment reaches the funding
+  -- check, which the approved 50.0 fails against the 20.0 remaining after
+  -- "partial" fired. Without the approval, the arbiter acting alone would
+  -- fail earlier, on "no alternative is satisfied", never reaching funding.
+  failsBecause (actAs [e.arbiter]) "the release must be positive and funded by the remaining amount" $
+    exerciseCmd next $ (enactArg "award" [e.arbiter]) with legs = awardLegs
+
+-- CIP-TBD section 3.3/3.5: `actingParties` joins `actors` with the approvers
+-- recorded for exactly `(ruleId, legs)`, both for `Guard_Parties` and for the
+-- "an entitled enactor must act" check. A `Guard_Parties` member's own
+-- approval can meet the guard threshold, but not the enactor check: the
+-- entitled enactor, outside the guard, must still act, or approve. Once the
+-- enactor approves the same `(ruleId, legs)` too, both recorded approvals
+-- together let the guard member enact alone.
+test_enactorRequirementMetByApproval : Script ()
+test_enactorRequirementMetByApproval = do
+  e <- setup ()
+  let terms = (termsFor e) with
+        rules = [CL.Rule "release" [e.arbiter] (alt (CL.Guard_Parties [e.bob] 1))
+          (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 100.0 emptyMetadata] [])]
+  (cid1, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+
+  approvedByBob <- submit e.bob $ exerciseCmd cid1 $ approveArg "release" [] [e.bob]
+  (cid2, _) <- asLocked approvedByBob
+
+  -- Bob's own approval satisfies the `Guard_Parties` threshold, but he is not
+  -- an entitled enactor of the rule, and acting alone he cannot become one.
+  failsBecause (actAs [e.bob] <> readAs [e.alice]) "an entitled enactor must act" $
+    exerciseCmd cid2 $ enactArg "release" [e.bob]
+
+  -- The arbiter, an entitled enactor, approves the same `(ruleId, legs)` too:
+  -- both bob (`Guard_Parties`) and the arbiter (an enactor) are recorded.
+  approvedByArbiter <- submit e.arbiter $ exerciseCmd cid2 $ approveArg "release" [] [e.arbiter]
+  (cid3, _) <- asLocked approvedByArbiter
+  Some view <- queryInterfaceContractId e.alice cid3
+  view.approvals === [CL.Approval "release" [] [e.bob, e.arbiter]]
+
+  -- Bob enacts alone: `actingParties` joins his bare actor with both recorded
+  -- approvers, so the entitled arbiter is deemed to act and the guard is met.
+  result <- submit e.bob $ exerciseCmd cid3 $ enactArg "release" [e.bob]
+  case result.output of
+    CL.ConditionalLockResult_Enacted [out] [] None -> assertToken e.bob out (account e.bob) terms.instrumentId 100.0
+    _ -> abort "expected bob's solo enactment to succeed once both approvals were recorded"
+
+-- CIP-TBD section 3.3: `ConditionalLock_Approve`'s recorded approvers are the
+-- members of `actors` that can approve the rule, not every actor the choice
+-- was exercised with; an authorizing actor outside `approvalParties rule`
+-- contributes nothing to the record.
+test_approveRecordsOnlyApprovalParties : Script ()
+test_approveRecordsOnlyApprovalParties = do
+  e <- setup ()
+  let terms = termsFor e
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  approved <- submit (actAs [e.arbiter, e.alice]) $ exerciseCmd cid $ approveArg "release" [] [e.arbiter, e.alice]
+  (cid2, _) <- asLocked approved
+  Some view <- queryInterfaceContractId e.alice cid2
+  view.approvals === [CL.Approval "release" [] [e.arbiter]]

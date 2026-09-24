@@ -23,11 +23,11 @@ Neither credential is loopback-only. Splice's `compose.yaml` binds the nginx UI 
 
 Ports follow Splice's pattern (suffixes 901 gRPC Ledger, 902 admin, 975 JSON Ledger, 903 validator admin): app-provider is 3975 JSON / 3901 gRPC / 3903 validator; app-user is 2975 / 2901 / 2903; SV is 4975 / 4901 / 4903. UIs: app-user wallet `http://wallet.localhost:2000`, app-provider wallet `http://wallet.localhost:3000`, SV `http://sv.localhost:4000`, scan `http://scan.localhost:4000`. Postgres is on host port 5433 (`DB_PORT` in `.env.localnet.example`), not Splice's 5432, because another project's stack commonly holds 5432.
 
-## The 72-script suite against localnet
+## The 94-script suite against localnet
 
 Daml Script derives deterministic party-id hints (e.g., `alice-d4d95138`), so a second proof run against the same persistent participant fails at `allocateParty` with "Party already exists". The preflight detects this and instructs you to run `./scripts/localnet.sh --clean && ./scripts/localnet.sh` first.
 
-The 72-script Daml test suite runs against this localnet, 56 of 72 passing, in a single `dpm script --all` invocation on a fresh ledger:
+The 94-script Daml test suite runs against this localnet, 77 of 94 passing, in a single `dpm script --all` invocation on a fresh ledger:
 
 ```bash
 T=$(mktemp); chmod 600 "$T"; python3 scripts/lib/localnet_token.py --admin > "$T"
@@ -36,9 +36,9 @@ dpm script --all --dar packages/conditional-lock-test/.daml/dist/conditional-loc
   --user-id ledger-api-user --access-token-file "$T"; rm -f "$T"
 ```
 
-All 16 failures are the same thing: this participant has no controllable clock. It reports `staticTime.supported: false`, so fourteen scripts fail at `setTime` with "setTime is not supported in wallclock mode", and two more (`test_malformedTermsAndFundingFailWithoutConsumingInputs`, `test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected`) assert on expiry boundaries they cannot reach without one. None fail on party allocation, authentication, or lock semantics. It must be one `--all` invocation rather than one per script, because Daml Script allocates a party once per process but derives the same id hint every time, so a second process collides on the first `allocateParty`.
+All 17 failures are the same thing: this participant has no controllable clock. It reports `staticTime.supported: false`, so fifteen scripts fail at `setTime` with "setTime is not supported in wallclock mode", and two more (`test_malformedTermsAndFundingFailWithoutConsumingInputs`, `test_durationBoundsAtTheLimitAreAcceptedAndOverTheLimitRejected`) assert on expiry boundaries they cannot reach without one. None fail on party allocation, authentication, or lock semantics. It must be one `--all` invocation rather than one per script, because Daml Script allocates a party once per process but derives the same id hint every time, so a second process collides on the first `allocateParty`.
 
-`dpm test` and `./scripts/test-compatibility.sh` remain the suite's home, each gets a fresh controlled-time ledger per run, and all 72 pass there. What the localnet adds is the other 56 running against the Splice release Mainnet runs.
+`dpm test` and `./scripts/test-compatibility.sh` remain the suite's home, each gets a fresh controlled-time ledger per run, and all 94 pass there. What the localnet adds is the other 77 running against the Splice release Mainnet runs.
 
 ## The `localnet/` submodule
 

@@ -17,6 +17,21 @@ predates this rule and ships `*-1.0.0.dar`.
 
 ## [Unreleased]
 
+### Added
+
+- Recorded, sequential rule approvals (CIP round three). The interface gains `Approval`,
+  `ConditionalLockView.approvals`, the `ConditionalLock_Approve` choice with
+  `conditionalLock_approveExtraObservers` and `conditionalLock_approveImpl`, and `CLA_Approve`.
+  `ConditionalLock_Enact` counts `actors` together with the approvers recorded for exactly its
+  `(ruleId, legs)`, for `Guard_Parties` and for the enactor requirement, so a threshold can be met
+  one party at a time and a venue can enact a fully approved settlement alone.
+  `conditional-lock-utils` adds the approval bookkeeping (`approve`, `actingParties`,
+  `approversFor`, `recordApproval`, `dropApprovals`, `clearApprovals`, `approvalParties`,
+  `hasPartiesGuard`); the TestTokenV2 adapter implements the choice, keeps approvals of unfired
+  rules across continuations, drops a fired rule's approvals, and clears them on amendment. The
+  off-ledger API gains `POST /registry/conditional-lock/v1/{lockContractId}/choice-contexts/approve`.
+  The interface package ID changes.
+
 ### Changed
 
 - Time checks in `conditional-lock-utils` and the TestTokenV2 adapter are bounds on ledger time

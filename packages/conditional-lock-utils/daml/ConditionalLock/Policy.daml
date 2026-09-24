@@ -275,6 +275,9 @@ hashPreimage algorithm preimage =
 
 -- | Guard evaluation (CIP section 3.5). A rule is enactable when some alternative
 -- is satisfied, and an alternative is satisfied when every guard in `allOf` is.
+-- `actors` are the acting parties of `ConditionalLock_Enact`: its own `actors`
+-- together with the approvers recorded for the enacted `(ruleId, legs)`, as
+-- `actingParties` computes them.
 --
 -- Time guards are evaluated as bounds on ledger time (`isLedgerTimeGE` and
 -- `isLedgerTimeLT`), never by reading it with `getTime`. Reading ledger time
@@ -422,3 +425,79 @@ resolveOutcome l terms (Outcome_Release fixedLegs receivers) supplied = do
   assertMsg "the release must be positive and funded by the remaining amount" $
     total > 0.0 && total <= terms.amount
   pure legs
+
+-- Approval bookkeeping for `ConditionalLockView.approvals` (CIP section 3.3).
+-- Pure functions over the interface types, so every registry keeps the same
+-- record: `approve` for `ConditionalLock_Approve`, `actingParties` for
+-- `ConditionalLock_Enact`, `dropApprovals` on a continuation, and
+-- `clearApprovals` on an amendment.
+
+-- | The parties that can approve an enactment of `rule`: its enactors and the
+-- parties of every `Guard_Parties` in its alternatives.
+approvalParties : Rule -> [Party]
+approvalParties = dedup . ruleParties
+
+-- | True when some alternative of `rule` contains a `Guard_Parties`, so that
+-- `CLA_Approve` is listed for it.
+hasPartiesGuard : Rule -> Bool
+hasPartiesGuard rule = any (any isParties . (.allOf)) rule.anyOf
+  where
+    isParties = \case
+      Guard_Parties _ _ -> True
+      _ -> False
+
+-- | The approvers recorded for exactly `(ruleId, legs)`. Leg lists are compared
+-- as lists, so order matters.
+approversFor : Text -> [Leg] -> [Approval] -> [Party]
+approversFor ruleId legs approvals =
+  concat [ a.approvers | a <- approvals, a.ruleId == ruleId, a.legs == legs ]
+
+-- | The acting parties of `ConditionalLock_Enact`: `actors` together with the
+-- approvers recorded for exactly `(ruleId, legs)`.
+actingParties : Text -> [Leg] -> [Party] -> [Approval] -> [Party]
+actingParties ruleId legs actors approvals =
+  dedup (actors <> approversFor ruleId legs approvals)
+
+-- | Add `approvers` to the approval of `(ruleId, legs)`, creating it if absent.
+-- Set union, so approving twice changes nothing and nothing is ever removed.
+recordApproval : Text -> [Leg] -> [Party] -> [Approval] -> [Approval]
+recordApproval ruleId legs approvers approvals =
+  case break matches approvals of
+    (before, a :: after) -> before <> [a with approvers = dedup (a.approvers <> approvers)] <> after
+    (_, []) -> approvals <> [Approval ruleId legs (dedup approvers)]
+  where matches a = a.ruleId == ruleId && a.legs == legs
+
+-- | The approvals a continuation keeps once `ruleId` has fired.
+dropApprovals : Text -> [Approval] -> [Approval]
+dropApprovals ruleId = filter (\a -> a.ruleId /= ruleId)
+
+-- | The approvals an amendment keeps: none, since new terms need new consent.
+clearApprovals : [Approval] -> [Approval]
+clearApprovals _ = []
+
+-- | `ConditionalLock_Approve` over the interface types: checks the choice's
+-- failure conditions against the current terms and returns the updated
+-- approvals. The recorded approvers are the members of `actors` that can approve
+-- the rule; the ledger has already checked that every actor authorized the
+-- exercise. Approval is limited to rules with a `Guard_Parties`, the only guard
+-- it can satisfy, so `CLA_Approve` lists every rule that accepts it. The
+-- expiry check is a ledger-time bound, as at `satisfied`.
+approve : Limits -> LockTerms -> [Approval] -> Text -> [Leg] -> [Party] -> Update [Approval]
+approve l terms approvals ruleId legs actors = do
+  beforeExpiry <- isLedgerTimeLT terms.expiresAt
+  assertMsg "cannot approve at or after expiry" beforeExpiry
+  rule <- optional (abort "unknown or already enacted rule") pure
+    (find (\r -> r.id == ruleId) terms.rules)
+  assertMsg "the rule has no Guard_Parties to approve" (hasPartiesGuard rule)
+  let approvers = filter (`elem` approvalParties rule) (dedup actors)
+  assertMsg "no actor can approve this rule" (not (null approvers))
+  _ <- resolveOutcome l terms rule.outcome legs
+  -- One leg list per approver per rule, and no exercise that records nothing:
+  -- together they bound both the record and the number of times a party can
+  -- replace the lock contract.
+  let elsewhere = concat [ a.approvers | a <- approvals, a.ruleId == ruleId, a.legs /= legs ]
+  assertMsg "an approver has already approved other legs for this rule" $
+    not (any (`elem` elsewhere) approvers)
+  assertMsg "every approver has already approved these legs" $
+    any (`notElem` approversFor ruleId legs approvals) approvers
+  pure (recordApproval ruleId legs approvers approvals)

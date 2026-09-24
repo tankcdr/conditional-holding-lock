@@ -47,7 +47,7 @@ template Factory with
         let meta = resultMetadata "lock" "conditional lock"
         change <- issueChange arg.terms (total - arg.terms.amount) meta
         let accepted = filter (\a -> authorized (accountParties a) arg.actors) (termReceivers arg.terms)
-        (output, state) <- start tokenRulesCid lockId arg.terms accepted []
+        (output, state) <- start tokenRulesCid lockId arg.terms accepted [] []
         report state arg.terms.authorizer arg.inputHoldingCids
           (change <> [toInterfaceContractId state.holdingCid]) [] meta
         pure (CL.ConditionalLockResult output change meta)
@@ -99,6 +99,9 @@ data State = State with
     -- Retained across continuations and amendments, so a rule ID fires once for
     -- the lifetime of the lock ID.
     enactedRuleIds : [Text]
+    -- Recorded rule approvals: kept across continuations for the rules that
+    -- remain, dropped for a rule that fires, cleared by an amendment.
+    approvals : [CL.Approval]
   deriving (Eq, Show, Serializable)
 
 stateSignatories : State -> [Party]
@@ -122,10 +125,13 @@ instructionActions s = Map.fromList
   where approvers = map accountParties (pending s)
 
 -- One `CLA_Enact` entry per rule, listing the parties entitled to enact it.
--- Presence does not mean an alternative is currently satisfied.
+-- Presence does not mean an alternative is currently satisfied. One
+-- `CLA_Approve` entry per rule with a `Guard_Parties`, listing each party that
+-- can approve it alone.
 lockActions : State -> Map.Map CL.ConditionalLockAction [[Party]]
 lockActions s = Map.fromList $
   [ (CL.CLA_Enact r.id, map (\p -> [p]) r.enactors) | r <- s.terms.rules ] <>
+  [ (CL.CLA_Approve r.id, map (\p -> [p]) (approvalParties r)) | r <- s.terms.rules, hasPartiesGuard r ] <>
   [ (CL.CLA_Expire, [accountParties s.terms.authorizer])
   , (CL.CLA_Cancel, [consent s])
   , (CL.CLA_Amend, [consent s]) ]
@@ -152,7 +158,7 @@ template Instruction with
         consumeBacking state
         let meta = resultMetadata "lock" "approved"
         (output, next) <- start state.tokenRulesCid state.lockId state.terms
-          (dedup (arg.approver :: state.accepted)) state.enactedRuleIds
+          (dedup (arg.approver :: state.accepted)) state.enactedRuleIds []
         report next state.terms.authorizer [toInterfaceContractId state.holdingCid]
           [toInterfaceContractId next.holdingCid] [] meta
         pure (CL.ConditionalLockResult output [] meta)
@@ -176,7 +182,7 @@ template ActiveLock with
     ensure null (pending state)
 
     interface instance CL.ConditionalLock for ActiveLock where
-      view = CL.ConditionalLockView state.lockId state.terms state.enactedRuleIds
+      view = CL.ConditionalLockView state.lockId state.terms state.enactedRuleIds state.approvals
         [toInterfaceContractId state.holdingCid] (lockActions state) (resultMetadata "lock" "active")
       conditionalLock_enactExtraObservers arg = enactObservers state arg
       -- Funds return to the authorizer, already a signatory.
@@ -184,31 +190,46 @@ template ActiveLock with
       conditionalLock_cancelExtraObservers _ = namedParties state.terms
       conditionalLock_amendExtraObservers arg =
         dedup (namedParties state.terms <> namedParties arg.newTerms)
+      -- The lock's observers, informees of the archive and create below, so the
+      -- choice stays a single view. Total: an unknown or already enacted rule ID
+      -- yields no observers and the choice body rejects the exercise.
+      conditionalLock_approveExtraObservers arg =
+        if any (\r -> r.id == arg.ruleId) state.terms.rules then namedParties state.terms else []
+      conditionalLock_approveImpl self arg = do
+        approvals <- approve referenceLimits state.terms state.approvals arg.ruleId arg.legs arg.actors
+        archive (coerceContractId self : ContractId ActiveLock)
+        -- The backing holding is unchanged, so this is not a holdings change and
+        -- nothing is reported through the EventLog.
+        cid <- create (ActiveLock state with approvals)
+        pure $ CL.ConditionalLockResult
+          (CL.ConditionalLockResult_Locked (toInterfaceContractId cid) [toInterfaceContractId state.holdingCid])
+          [] (resultMetadata "lock" "rule approved")
       conditionalLock_enactImpl self arg = do
         beforeExpiry <- isLedgerTimeLT state.terms.expiresAt
         assertMsg "rules cannot fire at or after expiry" beforeExpiry
         rule <- optional (abort "unknown or already enacted rule") pure
           (find (\r -> r.id == arg.ruleId) state.terms.rules)
-        assertMsg "an entitled enactor must act" (any (`elem` arg.actors) rule.enactors)
+        let acting = actingParties arg.ruleId arg.legs arg.actors state.approvals
+        assertMsg "an entitled enactor must act" (any (`elem` acting) rule.enactors)
         assertMsg "at most max-preimages preimages" (validWitness referenceLimits arg.witness)
-        enactable <- satisfied arg.actors arg.witness rule.anyOf
+        enactable <- satisfied acting arg.witness rule.anyOf
         assertMsg "no alternative is satisfied" enactable
         legs <- resolveOutcome referenceLimits state.terms rule.outcome arg.legs
         archive (coerceContractId self : ContractId ActiveLock)
         enact state (Some rule.id) rule.id legs (filter (\r -> r.id /= rule.id) state.terms.rules)
-          (rule.id :: state.enactedRuleIds)
+          (rule.id :: state.enactedRuleIds) (dropApprovals rule.id state.approvals)
       conditionalLock_expireImpl self arg = do
         expired <- isLedgerTimeGE state.terms.expiresAt
         assertMsg "a lock cannot expire before its expiry" expired
         requireActors "authorizer account must authorize expiry" (accountParties state.terms.authorizer) arg.actors
         archive (coerceContractId self : ContractId ActiveLock)
         enact state None "expire" [CL.Leg "expire" state.terms.authorizer state.terms.amount emptyMetadata]
-          [] state.enactedRuleIds
+          [] state.enactedRuleIds []
       conditionalLock_cancelImpl self arg = do
         requireActors "cancellation requires unanimity" (consent state) arg.actors
         archive (coerceContractId self : ContractId ActiveLock)
         enact state None "cancel" [CL.Leg "cancel" state.terms.authorizer state.terms.amount emptyMetadata]
-          [] state.enactedRuleIds
+          [] state.enactedRuleIds []
       conditionalLock_amendImpl self arg = do
         beforeExpiry <- isLedgerTimeLT state.terms.expiresAt
         assertMsg "cannot amend at or after expiry" beforeExpiry
@@ -232,6 +253,7 @@ template ActiveLock with
         let meta = resultMetadata "lock" "amended"
         change <- issueChange arg.newTerms (state.terms.amount + topUp - arg.newTerms.amount) meta
         (output, next) <- start state.tokenRulesCid state.lockId arg.newTerms accepted state.enactedRuleIds
+          (clearApprovals state.approvals)
         report next state.terms.authorizer
           (toInterfaceContractId state.holdingCid :: arg.additionalInputHoldingCids)
           (change <> [toInterfaceContractId next.holdingCid]) [] meta
@@ -250,11 +272,11 @@ enactObservers s arg = case find (\r -> r.id == arg.ruleId) s.terms.rules of
       in filter (`notElem` accountParties s.terms.authorizer) $
          dedup (concatMap accountParties (filter (/= s.terms.authorizer) paid))
 
-start : ContractId Token.TokenRules -> Text -> CL.LockTerms -> [V2.Account] -> [Text]
+start : ContractId Token.TokenRules -> Text -> CL.LockTerms -> [V2.Account] -> [Text] -> [CL.Approval]
   -> Update (CL.ConditionalLockResult_Output, State)
-start tokenRulesCid lockId terms accepted enactedRuleIds = do
+start tokenRulesCid lockId terms accepted enactedRuleIds approvals = do
   holdingCid <- create LockedHolding with terms; accepted
-  let state = State with tokenRulesCid; lockId; terms; accepted; holdingCid; enactedRuleIds
+  let state = State with tokenRulesCid; lockId; terms; accepted; holdingCid; enactedRuleIds; approvals
   output <- if null (pending state) then do
     cid <- create (ActiveLock state)
     pure $ CL.ConditionalLockResult_Locked (toInterfaceContractId cid) [toInterfaceContractId holdingCid]
@@ -300,8 +322,9 @@ withdraw s reason = do
 -- `reason` labels the change for wallets. `ruleId` identifies the enacted rule
 -- (CIP section 3.7) and is `None` for expiry and cancellation, which are not
 -- rules and pay the authorizer alone.
-enact : State -> Optional Text -> Text -> [CL.Leg] -> [CL.Rule] -> [Text] -> Update CL.ConditionalLockResult
-enact s ruleId reason legs rules enactedRuleIds = do
+enact : State -> Optional Text -> Text -> [CL.Leg] -> [CL.Rule] -> [Text] -> [CL.Approval]
+  -> Update CL.ConditionalLockResult
+enact s ruleId reason legs rules enactedRuleIds approvals = do
   let kind = if any (\l -> l.receiver /= s.terms.authorizer) legs then "transfer" else "unlock"
   let base = (resultMetadata kind reason).values
   let meta = Metadata $
@@ -313,7 +336,7 @@ enact s ruleId reason legs rules enactedRuleIds = do
   next <- if remaining == 0.0 then pure None else do
     let terms = s.terms with amount = remaining; rules
     (output, _) <- start s.tokenRulesCid s.lockId terms
-      (filter (`elem` termReceivers terms) s.accepted) enactedRuleIds
+      (filter (`elem` termReceivers terms) s.accepted) enactedRuleIds approvals
     case output of
       CL.ConditionalLockResult_Locked lockCid [holdingCid] -> pure (Some (lockCid, holdingCid))
       _ -> abort "a continuation cannot require a new approval"

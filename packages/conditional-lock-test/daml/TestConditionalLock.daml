@@ -105,6 +105,9 @@ asPending result = case result.output of
 enactArg : Text -> [Party] -> CL.ConditionalLock_Enact
 enactArg id actors = CL.ConditionalLock_Enact id actors noWitness [] extra
 
+approveArg : Text -> [CL.Leg] -> [Party] -> CL.ConditionalLock_Approve
+approveArg id legs actors = CL.ConditionalLock_Approve id legs actors extra
+
 assertToken : Party -> ContractId V2.Holding -> V2.Account -> V2.InstrumentId -> Decimal -> Script ()
 assertToken party cid owner instrument amount = do
   Some token <- queryContractId party (coerceContractId cid : ContractId Token.Token)

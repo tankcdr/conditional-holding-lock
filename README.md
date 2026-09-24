@@ -2,13 +2,13 @@
 
 Apache-2.0 reference code for [CIP-TBD-Conditional-Holding-Lock](docs/cip/CIP-TBD-Conditional-Holding-Lock.md). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-**Status.** The CIP is a draft under review on [Splice PR 7294](https://github.com/canton-network/splice/pull/7294); it has not yet been submitted upstream to `canton-foundation/cips`. The reference implementation is released as [v0.1.0](https://github.com/tankcdr/conditional-holding-lock/releases/tag/v0.1.0), interface package ID `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac`; the unreleased `main` builds interface `0.2.0`, package ID `ed3faf9fa8b9bd68789715451c133695acada4247c3e57709268a5dc0b2b5e61`.
+**Status.** The CIP is a draft under review on [Splice PR 7294](https://github.com/canton-network/splice/pull/7294); it has not yet been submitted upstream to `canton-foundation/cips`. The reference implementation is released as [v0.1.0](https://github.com/tankcdr/conditional-holding-lock/releases/tag/v0.1.0), interface package ID `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac`; the unreleased `main` builds interface `0.2.0`, package ID `ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e`.
 
 This repository provides the interface package, a reference policy evaluator a registry can adopt on its own, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent approver authorization, one-step locking, and atomic two-registry settlement. See the [Conditional Holding Lock validation report](docs/runbook/conditional-lock-validation.md).
 
 ## Worked examples
 
-Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 72 Daml Scripts: 6 worked-example scripts, 55 mechanics proofs, and 11 policy-limit proofs. See the [validation report's worked-example table](docs/runbook/conditional-lock-validation.md#worked-example-coverage) for the full mapping, including the note that `test_example_dvpBetweenRegistries` exercises only the two-registry `settle` path, not the dispute-window `award` path.
+Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedExamples.daml](packages/conditional-lock-test/daml/TestWorkedExamples.daml). Each script checks the example's lifecycle, failed attempts, resulting holdings and locks, and V2 events. The suite contains 94 Daml Scripts: 7 worked-example scripts (the escrowed DvP has a joint and a venue form), 76 mechanics proofs, and 11 policy-limit proofs. See the [validation report's worked-example table](docs/runbook/conditional-lock-validation.md#worked-example-coverage) for the full mapping, including the note that `test_example_dvpBetweenRegistries` exercises only the two-registry `settle` path, not the dispute-window `award` path.
 
 ## Build and prove
 
@@ -102,4 +102,4 @@ pnpm test:integration                         # DvP-between-registries integrati
 ./scripts/localnet.sh --down                  # Stop, keep volumes
 ```
 
-The 72-script Daml test suite runs against this localnet too, 56 of 72 passing (the other 16 need a controllable clock this participant does not have). See [docs/runbook/localnet.md](docs/runbook/localnet.md) for credentials, ports, party-id hints, the 16-failure analysis, the `localnet/` submodule's history, and the integration test's known flake. The vendored Splice tree's provenance is in [localnet-overrides/README.md](localnet-overrides/README.md).
+The 94-script Daml test suite runs against this localnet too, 77 of 94 passing (the other 17 need a controllable clock this participant does not have). See [docs/runbook/localnet.md](docs/runbook/localnet.md) for credentials, ports, party-id hints, the 16-failure analysis, the `localnet/` submodule's history, and the integration test's known flake. The vendored Splice tree's provenance is in [localnet-overrides/README.md](localnet-overrides/README.md).
