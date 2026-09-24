@@ -52,7 +52,7 @@ Two warnings that matter more than the table:
   quickstart in section 6 runnable end to end. It is not a production dependency, and a production
   registry replaces it with an adapter over its own token package.
 - **`conditional-lock-test` must never appear in a consumer's `data-dependencies`.** It is the
-  70-script proof suite, it depends on `daml-script`, and it compiles with
+  72-script proof suite, it depends on `daml-script`, and it compiles with
   `-Wno-template-interface-depends-on-daml-script`. It is deliberately not attached to the release,
   and it is recorded in the release manifest with `"attached": false` so its absence is a decision
   rather than an oversight.
@@ -78,8 +78,9 @@ compatibility, using package IDs. Section 7 gives the worked example. This is th
 the [release notes](release-notes/v0.1.0.md) make, in the same words, and it is the single fact
 that determines whether your integration survives a rebuild.
 
-Note the DAR **filenames** carry `1.0.0`, not the release version. That is deliberate, and the
-reasons are in [CHANGELOG.md](../CHANGELOG.md) under "Versioning rule"; they are not restated here.
+The DAR **filenames** carry the release version from `v0.2.0` on; `v0.1.0` predates that rule and
+ships `*-1.0.0.dar`, which the commands below use. The reasons are in [CHANGELOG.md](../CHANGELOG.md)
+under "Versioning rule".
 
 ---
 
@@ -385,7 +386,7 @@ and names any that are missing before it starts a sandbox.
 # Against the DARs you downloaded in section 2:
 ./scripts/quickstart-check.sh dars/
 
-# Against this repository's own build outputs, which works before any tag exists:
+# Against this repository's own build outputs, which does not need the release assets:
 ./scripts/quickstart-check.sh
 # or
 just quickstart
@@ -417,8 +418,8 @@ What the script does, and what you would do by hand on your own participant:
 participant and one synchronizer with controlled time. `Guard_After` and `Guard_Before` behave very
 differently under wall-clock time on a real participant with a submission delay — which is the whole
 reason section 3.3 exists. Treat the quickstart as proof that your dependency set is right, not as
-proof that your timing is. The next step after it passes is a real network, which is what the
-adoption evidence log below will cover — that document does not exist yet.
+proof that your timing is. The next step after it passes is a real network, which
+[adoption-evidence.md](adoption-evidence.md) records.
 
 ---
 

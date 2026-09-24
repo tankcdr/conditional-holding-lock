@@ -8,9 +8,9 @@ This report answers "does the reference implementation work, and against what". 
 
 | Component | Observed configuration | Assessment |
 | --- | --- | --- |
-| Compiler | DPM 1.0.21; SDK 3.5.2 | Matches Splice main and both network references |
+| Compiler | DPM 1.0.21; SDK 3.5.2 | Matches Splice release tag `0.8.1` and both network references |
 | First-party language target | LF 2.1; explicit serializability | Matches the V2 packages; no development LF target |
-| Java | Global JDK 26; project tests select installed JDK 21 | Tests no longer depend on an unsupported global Java or stale `JAVA_HOME` |
+| Java | Project tests select installed JDK 21 | Tests do not depend on an unsupported global Java or stale `JAVA_HOME` |
 | Foundry | 1.3.6, Solidity 0.8.24 | Both byte-domain hash algorithms tested |
 | Solana | Agave CLI/runtime dependencies 3.1.14, platform-tools v1.52, Rust 1.89.0, LiteSVM 0.9.1 | Compiled SBF program matches both hashes on the shared vectors in a local VM |
 | Docker localnet stack | Splice 0.8.0; the participant's `/v2/version` reports Canton 3.5.16 | Splice's own `cluster/compose/localnet` tree at the Mainnet release, vendored under `localnet-overrides/splice-0.8.0/`; `check-compatibility.py`'s localnet row fails when Mainnet moves past it |
@@ -23,7 +23,7 @@ The published DAR dependencies come from Splice release tag [`0.8.1`](https://gi
 
 ## Executable proofs
 
-**Result: PASS.** All 70 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.16 and 3.5.17. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
+**Result: PASS.** All 72 Daml Scripts in the suite passed on the IDE ledger and on both Canton 3.5.16 and 3.5.17. Both Solidity tests passed against the six shared vectors. Three Solana SBF tests also passed: both hash syscalls match those vectors, and malformed byte lengths and accidental hex-text inputs are rejected.
 
 Run from the repository root:
 
@@ -33,7 +33,7 @@ Run from the repository root:
 python3 scripts/check-compatibility.py
 ```
 
-The normal suite has 70 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples, the ten `TestPolicyLimits` policy-limit proofs, and the on-ledger preimage-count proof. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
+The normal suite has 72 Daml Scripts, two Solidity tests, and three Solana SBF tests. Each Canton runtime run uploads the DAR, exercises the real Ledger API, verifies the reported Canton version, checks that all core proofs ran, and writes `results.json`, `ledger-version.json`, and `evidence.json` under `.localnet/compatibility-<network>.*`. The core-proof check includes all six named worked examples, the eleven `TestPolicyLimits` policy-limit proofs, and the on-ledger preimage-count proof. Evidence includes the compiled package IDs and DAR hashes. The snapshot is [validation evidence](conditional-lock-validation-evidence.json).
 
 | Required proof | Test and assertion |
 | --- | --- |
@@ -51,7 +51,7 @@ Additional proofs cover account-provider acceptance, sequential acceptance by mu
 
 ### DvP between registries, against real Canton Coin
 
-The 70-script suite settles two TestTokenV2 registries against each other, which proves the mechanics but not the integration. `pnpm test:integration` runs the same CIP-0112 section 4 example on the Mainnet-configuration localnet with a real counter-asset: TestTokenV2 locked under the conditional lock as the delivery leg, and **real Amulet** as the payment leg.
+The 72-script suite settles two TestTokenV2 registries against each other, which proves the mechanics but not the integration. `pnpm test:integration` runs the same CIP-0112 section 4 example on the Mainnet-configuration localnet with a real counter-asset: TestTokenV2 locked under the conditional lock as the delivery leg, and **real Amulet** as the payment leg.
 
 Both legs settle in one transaction. The executor submits two commands in a single `submit-and-wait-for-transaction` — `SettlementFactory_SettleBatch` on Splice's `ExternalPartyAmuletRules`, and `ConditionalLock_Enact` on the active lock — so the ledger records one update with two root nodes, one per leg. That is the atomicity claim, and it is checked against the participant's own re-read of the update rather than against what the harness submitted: the evidence gate recomputes the root nodes from `nodeId`/`lastDescendantNodeId` containment and refuses evidence that does not show exactly two.
 
@@ -66,11 +66,13 @@ Daml Script tests for all six CIP section 4 worked examples live in [TestWorkedE
 | CIP section 4 example | Named script | Mechanics proofs it relies on |
 | --- | --- | --- |
 | HTLC leg | `test_example_htlcLeg` | approver authority, expiry boundary, Keccak vs SHA-256, hash vectors |
-| Escrowed DvP with a dispute window | `test_example_dvpBetweenRegistries` | atomic two-registry DvP, rollback, threshold spoofing |
+| Escrowed DvP with a dispute window (`settle` path) | `test_example_dvpBetweenRegistries` | atomic two-registry DvP, rollback, threshold spoofing |
 | Arbiter escrow | `test_example_arbiterEscrow` | release bounds, multiple receivers, expiry refund |
 | Vesting | `test_example_vesting` | partial release conservation, spent-rule resurrection, guard boundaries (inclusive After, exclusive Before) |
 | Collateral | `test_example_collateral` | unlock without acceptance, amend top-up, amend cannot change asset |
 | Conditional payment | `test_example_conditionalPayment` | alternatives and guard boundaries (inclusive After, exclusive Before), enactor and threshold |
+
+`test_example_dvpBetweenRegistries` exercises only the `settle` rule of the CIP's escrowed-DvP example: a two-party `Guard_Parties` guard enacted atomically across two registries, plus its rollback and threshold-spoofing failure paths. It does not exercise a dispute window, an arbiter, or the `award` rule. The full example, including the `award` path after the deadline, is exercised by [`examples/devnet-escrow/daml/EscrowedDvpDevNet.daml`](../../examples/devnet-escrow/daml/EscrowedDvpDevNet.daml) against a real wall-clock ledger; see [adoption-evidence.md](../adoption-evidence.md).
 
 The HTLC script uses the first fixture, `zero`, for the basic SHA-256 claim and the exact-expiry refund. It uses `ascending-bytes`, whose hex encoding contains letters, to check case normalization and algorithm separation. The same preimage bytes must satisfy each algorithm's matching digest and fail against the other algorithm's digest. This makes the guard's algorithm selection observable while keeping the witness fixed.
 
@@ -129,14 +131,14 @@ Two narrow corrections are included in the CIP:
 
 ## Scope of the compatibility claim
 
-The proofs establish compilation and execution of these Daml contracts on the current network runtime versions. The 70-script suite's topology is one participant and one synchronizer with controlled ledger time.
+The proofs establish compilation and execution of these Daml contracts on the current network runtime versions. The 72-script suite's topology is one participant and one synchronizer with controlled ledger time.
 
 The DvP integration test (`pnpm test:integration`) extends that in three specific directions, and the scope statement has to be read against it. It runs on the Mainnet-configuration localnet across **two participants** under **wall-clock** time: the seller and the registry admin on app-provider, the buyer on app-user, with the buyer approving the lock on his own participant and the settlement confirmed across both. It is therefore a **multi-participant** proof, not a single-participant one. It also exercises **Splice wallet and registry integration** directly — the validator wallet API for the tap, the balance, and the V2 Amulet allocations, and scan's `/registry/allocation/v2/settlement-factory` for the settlement factory and its choice context.
 
-What it still does not establish: a public-network deployment; network traffic economics; production authentication (the localnet's credentials are the unsafe HS256 secret Splice ships plus the fixed participant admin token this repository pins, neither of which resembles a real deployment's); or external signing — the harness deliberately avoids it by naming one executor party hosted on the submitting participant, which is the design choice the README's integration section explains.
+What it still does not establish: a public-network deployment; network traffic economics; production authentication (the localnet's credentials are the unsafe HS256 secret Splice ships plus the fixed participant admin token this repository pins, neither of which resembles a real deployment's); or external signing — the harness deliberately avoids it by naming one executor party hosted on the submitting participant, which is the design choice [localnet.md](localnet.md) explains.
 
 The Solana addition is a local hash compatibility proof using pinned Agave runtime dependencies. It does not implement a token escrow or validate a live Solana cluster's feature set. See the [hash-vector runbook](hash-vectors.md#solana-proof) for the exact program input, output, and toolchain.
 
-The original shared Docker topology is still old and must not be described as mainnet-equivalent. Use the isolated matrix for this milestone. A production registry still needs its account controls, pause/allow-list behavior, HTTP choice contexts, distinct-ID issuance, and the full token-standard conformance suite.
+A production registry still needs its account controls, pause/allow-list behavior, HTTP choice contexts, distinct-ID issuance, and the full token-standard conformance suite.
 
-On Canton Coin, the earlier statement that it "requires the planned LockedAmulet/ExternalPartyAmuletRules and CIP-0107 work" is now half true and should be read as two claims. **Settling against Amulet needs no further work**: the DvP integration test moves real DSO-issued Amulet through Splice's own `ExternalPartyAmuletRules` settlement factory, in the same transaction that enacts a conditional lock over TestTokenV2, on the release Mainnet runs. **Locking Amulet itself still does**: Amulet has no `ConditionalLock` implementation, the locked asset in every proof here is a non-Amulet registry's, and that part follows Splice's own track. No outreach or subscriptions were performed as part of this implementation milestone.
+On Canton Coin, the earlier statement that it "requires the planned LockedAmulet/ExternalPartyAmuletRules and CIP-0107 work" is now half true and should be read as two claims. **Settling against Amulet needs no further work**: the DvP integration test moves real DSO-issued Amulet through Splice's own `ExternalPartyAmuletRules` settlement factory, in the same transaction that enacts a conditional lock over TestTokenV2, on the release Mainnet runs. **Locking Amulet itself still does**: Amulet has no `ConditionalLock` implementation, the locked asset in every proof here is a non-Amulet registry's, and that part follows Splice's own track.
