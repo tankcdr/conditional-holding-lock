@@ -30,7 +30,7 @@ Contents:
 
 Release mechanics — what is tagged, what is attached, how the manifest is generated, and the
 versioning rule — are **not** repeated here. They live in [CHANGELOG.md](../CHANGELOG.md) and
-[docs/release-notes/v0.1.0.md](release-notes/v0.1.0.md), and nowhere else.
+[docs/release-notes/v0.2.0.md](release-notes/v0.2.0.md), and nowhere else.
 
 ---
 
@@ -60,7 +60,7 @@ Two warnings that matter more than the table:
 The interface package ID, the one your contracts and your `data-dependencies` resolve against, is:
 
 ```
-splice-api-token-conditional-lock-v1  cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac
+splice-api-token-conditional-lock-v1  ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e
 ```
 
 That value is checked on every build by `scripts/verify-reproducible.sh`. The IDs of the other
@@ -75,11 +75,11 @@ jq -r '.packages[] | "\(.package_id)  \(.file)"' conditional-lock-release.json
 other.** The same compiled package can ship as two DAR files with different digests — zip entry
 order, timestamps, and compiler interface files vary between builds. Pin, and reason about
 compatibility, using package IDs. Section 7 gives the worked example. This is the same distinction
-the [release notes](release-notes/v0.1.0.md) make, in the same words, and it is the single fact
+the [release notes](release-notes/v0.2.0.md) make, in the same words, and it is the single fact
 that determines whether your integration survives a rebuild.
 
-The DAR **filenames** carry the release version from `v0.2.0` on; `v0.1.0` predates that rule and
-ships `*-1.0.0.dar`, which the commands below use. The reasons are in [CHANGELOG.md](../CHANGELOG.md)
+The DAR **filenames** carry the release version (`*-0.2.0.dar`); `v0.1.0` predates that rule and
+ships `*-1.0.0.dar`. The reasons are in [CHANGELOG.md](../CHANGELOG.md)
 under "Versioning rule".
 
 ---
@@ -96,9 +96,9 @@ your build reproducible, and the manifest below makes the re-pin mechanical.
 mkdir -p dars
 
 # 1. The three first-party DARs and the manifest, from the GitHub Release.
-gh release download v0.1.0 --repo tankcdr/conditional-holding-lock \
+gh release download v0.2.0 --repo tankcdr/conditional-holding-lock \
   --pattern '*.dar' --dir dars/
-gh release download v0.1.0 --repo tankcdr/conditional-holding-lock \
+gh release download v0.2.0 --repo tankcdr/conditional-holding-lock \
   --pattern 'conditional-lock-release.json' --dir .
 
 # 2. The six Splice DARs the release was built against, from the pinned Splice release tag.
@@ -143,9 +143,9 @@ package IDs reproduce, the file digests need not. The identity check that does h
 the package ID:
 
 ```bash
-dpm inspect-dar --json dars/splice-api-token-conditional-lock-v1-1.0.0.dar \
+dpm inspect-dar --json dars/splice-api-token-conditional-lock-v1-0.2.0.dar \
   | jq -r .main_package_id
-# -> cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac
+# -> ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e
 ```
 
 ---
@@ -177,9 +177,9 @@ data-dependencies:
 # Your own token package replaces the next line. The reference adapter uses Splice's TEST issuer:
 - dars/splice-test-token-v2-1.0.1.dar
 - dars/splice-token-standard-utils-2.0.0.dar
-# Conditional lock, from release v0.1.0
-- dars/splice-api-token-conditional-lock-v1-1.0.0.dar
-- dars/conditional-lock-utils-1.0.0.dar
+# Conditional lock, from release v0.2.0
+- dars/splice-api-token-conditional-lock-v1-0.2.0.dar
+- dars/conditional-lock-utils-0.2.0.dar
 build-options:
 - --explicit-serializable=yes
 - --target=2.1
@@ -292,7 +292,7 @@ whose `data-dependencies` are exactly these three:
 data-dependencies:
 - dars/splice-api-token-metadata-v1-1.0.0.dar
 - dars/splice-api-token-holding-v2-1.0.0.dar
-- dars/splice-api-token-conditional-lock-v1-1.0.0.dar
+- dars/splice-api-token-conditional-lock-v1-0.2.0.dar
 ```
 
 with the same `sdk-version: 3.5.2` and the same two `build-options`. Any instruction that says an
@@ -301,7 +301,7 @@ application needs "only the interface DAR" produces a build that does not compil
 An optional fourth line adds client-side validation:
 
 ```yaml
-- dars/conditional-lock-utils-1.0.0.dar
+- dars/conditional-lock-utils-0.2.0.dar
 ```
 
 `satisfied` answers "would this enactment succeed" against a rule's `anyOf` alternatives before
@@ -330,7 +330,7 @@ A wallet needs three things, and the smallest useful change is smaller than it l
 dpm codegen-js -o daml.js -s @myorg \
   dars/splice-api-token-metadata-v1-1.0.0.dar \
   dars/splice-api-token-holding-v2-1.0.0.dar \
-  dars/splice-api-token-conditional-lock-v1-1.0.0.dar
+  dars/splice-api-token-conditional-lock-v1-0.2.0.dar
 ```
 
 (`dpm codegen-js --help` lists `-o/--output-directory`, `-s/--npm-scope`, and `-V/--verbosity`;

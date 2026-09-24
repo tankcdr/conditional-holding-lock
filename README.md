@@ -2,7 +2,7 @@
 
 Apache-2.0 reference code for [CIP-TBD-Conditional-Holding-Lock](docs/cip/CIP-TBD-Conditional-Holding-Lock.md). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-**Status.** The CIP is a draft under review on [Splice PR 7294](https://github.com/canton-network/splice/pull/7294); it has not yet been submitted upstream to `canton-foundation/cips`. The reference implementation is released as [v0.1.0](https://github.com/tankcdr/conditional-holding-lock/releases/tag/v0.1.0), interface package ID `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac`; the unreleased `main` builds interface `0.2.0`, package ID `ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e`.
+**Status.** The CIP is a draft under review on [Splice PR 7294](https://github.com/canton-network/splice/pull/7294); it has not yet been submitted upstream to `canton-foundation/cips`. The reference implementation's latest release is [v0.2.0](https://github.com/tankcdr/conditional-holding-lock/releases/tag/v0.2.0), interface package ID `ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e`.
 
 This repository provides the interface package, a reference policy evaluator a registry can adopt on its own, an adapter over the published TestTokenV2 package, and executable proofs of byte-domain hashing, persistent approver authorization, one-step locking, and atomic two-registry settlement. See the [Conditional Holding Lock validation report](docs/runbook/conditional-lock-validation.md).
 
