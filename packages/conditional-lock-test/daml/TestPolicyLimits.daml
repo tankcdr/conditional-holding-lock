@@ -183,7 +183,6 @@ template PolicyProbe
     nonconsuming choice ProbeValidateTerms : ()
       with
         admin : Party
-        now : Time
         terms : CL.LockTerms
         probeMaxRules : Int
         probeMaxNamedParties : Int
@@ -195,7 +194,7 @@ template PolicyProbe
             maxRules = probeMaxRules
             maxNamedParties = probeMaxNamedParties
             minDuration = probeMinDuration
-            maxDuration = probeMaxDuration) admin now terms
+            maxDuration = probeMaxDuration) admin terms
 
 -- Every bound must come from the `Limits` argument rather than from a constant
 -- of the package. `referenceLimits` sets all six numeric bounds to 8, so a test
@@ -247,7 +246,7 @@ test_validateTermsReadsBoundsFromItsArgument = do
   let rule n = CL.Rule ("r" <> show n) [e.arbiter] (alt (CL.Guard_Parties [e.arbiter] 1)) CL.Outcome_Unlock
   let withRules n = (termsFor e) with rules = map rule [1 .. n]
   let probeWith terms rules parties low high = exerciseCmd probe ProbeValidateTerms with
-        admin = e.adminA, now = e.now, terms = terms
+        admin = e.adminA, terms = terms
         probeMaxRules = rules, probeMaxNamedParties = parties
         probeMinDuration = low, probeMaxDuration = high
   let ok terms rules parties low high =
@@ -276,3 +275,67 @@ test_validateTermsReadsBoundsFromItsArgument = do
   ok (termsFor e) 8 8 (seconds 1) (days 365)
   no (termsFor e) 8 8 (seconds 1) (hours 2)
   no (termsFor e) 8 8 (days 7) (days 365)
+
+-- `validateTerms` states its time checks as bounds on ledger time. Each is
+-- probed at a static ledger time `t0`, exactly at its boundary and one
+-- microsecond past it, so any drift between strict and inclusive shows here:
+-- requestedAt is strictly before now, and expiresAt lies in the closed interval
+-- [now + minDuration, now + maxDuration].
+test_validateTermsTimeChecksAreLedgerTimeBounds : Script ()
+test_validateTermsTimeChecksAreLedgerTimeBounds = do
+  e <- setup ()
+  probe <- submit e.adminA $ createCmd (PolicyProbe e.adminA)
+  let t0 = e.now `addRelTime` hours 1
+  let low = hours 1
+  let high = days 1
+  let base = (termsFor e) with
+        requestedAt = t0 `addRelTime` seconds (-1)
+        expiresAt = t0 `addRelTime` hours 2
+  let probeWith lo hi terms = exerciseCmd probe ProbeValidateTerms with
+        admin = e.adminA, terms = terms
+        probeMaxRules = 8, probeMaxNamedParties = 8
+        probeMinDuration = lo, probeMaxDuration = hi
+  let okWith lo hi terms = submit e.adminA (probeWith lo hi terms)
+  let noWith lo hi reason terms = failsBecause (actAs e.adminA) reason (probeWith lo hi terms)
+  let ok = okWith low high
+  let no = noWith low high
+  let outOfBounds = "expiry must be within the advertised duration bounds"
+  setTime t0
+
+  ok base
+  -- requestedAt: strictly in the past.
+  ok (base with requestedAt = t0 `addRelTime` microseconds (-1))
+  no "requestedAt must be in the past" (base with requestedAt = t0)
+  -- expiresAt >= now + minDuration, inclusive.
+  ok (base with expiresAt = t0 `addRelTime` low)
+  no outOfBounds (base with expiresAt = t0 `addRelTime` low `addRelTime` microseconds (-1))
+  -- expiresAt <= now + maxDuration, inclusive.
+  ok (base with expiresAt = t0 `addRelTime` high)
+  no outOfBounds (base with expiresAt = t0 `addRelTime` high `addRelTime` microseconds 1)
+
+  -- The ends of the Time range are decided by the same checks, with the same
+  -- messages, rather than by an arithmetic or stdlib error.
+  no outOfBounds (base with requestedAt = minBound, expiresAt = minBound `addRelTime` seconds 1)
+  no "requestedAt must be in the past" (base with requestedAt = maxBound)
+  noWith (seconds 0) high outOfBounds (base with expiresAt = maxBound)
+  noWith (hours (-1)) high outOfBounds (base with expiresAt = maxBound)
+  noWith (hours (-1)) high outOfBounds (base with expiresAt = maxBound `addRelTime` hours (-1))
+  noWith low (hours (-1)) outOfBounds (base with expiresAt = maxBound)
+  -- With a maxDuration long enough to reach maxBound, the minDuration check at
+  -- maxBound is observable on its own and holds.
+  okWith (seconds 0) (days (365 * 9000)) (base with expiresAt = maxBound)
+  okWith (hours (-1)) (days (365 * 9000)) (base with expiresAt = maxBound)
+  okWith (hours (-1)) (days (365 * 9000)) (base with expiresAt = maxBound `addRelTime` hours (-1))
+  -- The most negative RelTime is decided without negating it.
+  okWith (microseconds minBound) high base
+  noWith low (microseconds minBound) outOfBounds base
+  -- A maxDuration reaching back before the earliest Time admits any expiry
+  -- that meets minDuration.
+  okWith low (days (365 * 5000)) (base with expiresAt = t0 `addRelTime` days (365 * 2000))
+  -- A negative minDuration is not CIP-conformant, but validateTerms reads it
+  -- from its argument: expiresAt >= now - 1h admits an expiry 30 minutes ago.
+  okWith (hours (-1)) high (base with expiresAt = t0 `addRelTime` minutes (-30))
+  noWith (hours (-1)) high outOfBounds (base with expiresAt = t0 `addRelTime` hours (-2))
+  -- Likewise a negative maxDuration: expiresAt <= now - 1h.
+  okWith (hours (-2)) (hours (-1)) (base with expiresAt = t0 `addRelTime` minutes (-90))
+  noWith (hours (-2)) (hours (-1)) outOfBounds (base with expiresAt = t0 `addRelTime` minutes (-30))

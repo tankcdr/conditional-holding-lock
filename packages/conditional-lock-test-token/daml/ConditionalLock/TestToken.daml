@@ -9,6 +9,7 @@ import DA.Action (when)
 import DA.Foldable (forA_)
 import DA.Map qualified as Map
 import DA.TextMap qualified as TextMap
+import DA.Time (isLedgerTimeGE, isLedgerTimeLT)
 import Splice.Api.Token.MetadataV1
 import Splice.Api.Token.HoldingV1 qualified as V1
 import Splice.Api.Token.HoldingV2 qualified as V2
@@ -36,8 +37,7 @@ template Factory with
       conditionalLockFactory_lockExtraObservers arg = namedParties arg.terms
       conditionalLockFactory_publicFetchImpl _ _ = pure (CL.ConditionalLockFactoryView admin (limitsMetadata referenceLimits))
       conditionalLockFactory_lockImpl self arg = do
-        now <- getTime
-        validateTerms referenceLimits admin now arg.terms
+        validateTerms referenceLimits admin arg.terms
         requireActors "authorizer account must authorize funding" (accountParties arg.terms.authorizer) arg.actors
         rules <- fetch tokenRulesCid
         assertMsg "wrong TestTokenV2 rules admin" (rules.admin == admin)
@@ -144,8 +144,8 @@ template Instruction with
       conditionalLockInstruction_rejectExtraObservers _ = namedParties state.terms
       conditionalLockInstruction_withdrawExtraObservers _ = namedParties state.terms
       conditionalLockInstruction_acceptImpl self arg = do
-        now <- getTime
-        assertMsg "cannot accept at or after expiry" (now < state.terms.expiresAt)
+        beforeExpiry <- isLedgerTimeLT state.terms.expiresAt
+        assertMsg "cannot accept at or after expiry" beforeExpiry
         assertMsg "approver is not pending" (arg.approver `elem` pending state)
         requireActors "approver account must authorize acceptance" (accountParties arg.approver) arg.actors
         archive (coerceContractId self : ContractId Instruction)
@@ -185,20 +185,21 @@ template ActiveLock with
       conditionalLock_amendExtraObservers arg =
         dedup (namedParties state.terms <> namedParties arg.newTerms)
       conditionalLock_enactImpl self arg = do
-        now <- getTime
-        assertMsg "rules cannot fire at or after expiry" (now < state.terms.expiresAt)
+        beforeExpiry <- isLedgerTimeLT state.terms.expiresAt
+        assertMsg "rules cannot fire at or after expiry" beforeExpiry
         rule <- optional (abort "unknown or already enacted rule") pure
           (find (\r -> r.id == arg.ruleId) state.terms.rules)
         assertMsg "an entitled enactor must act" (any (`elem` arg.actors) rule.enactors)
         assertMsg "at most max-preimages preimages" (validWitness referenceLimits arg.witness)
-        assertMsg "no alternative is satisfied" (satisfied now arg.actors arg.witness rule.anyOf)
+        enactable <- satisfied arg.actors arg.witness rule.anyOf
+        assertMsg "no alternative is satisfied" enactable
         legs <- resolveOutcome referenceLimits state.terms rule.outcome arg.legs
         archive (coerceContractId self : ContractId ActiveLock)
         enact state (Some rule.id) rule.id legs (filter (\r -> r.id /= rule.id) state.terms.rules)
           (rule.id :: state.enactedRuleIds)
       conditionalLock_expireImpl self arg = do
-        now <- getTime
-        assertMsg "a lock cannot expire before its expiry" (now >= state.terms.expiresAt)
+        expired <- isLedgerTimeGE state.terms.expiresAt
+        assertMsg "a lock cannot expire before its expiry" expired
         requireActors "authorizer account must authorize expiry" (accountParties state.terms.authorizer) arg.actors
         archive (coerceContractId self : ContractId ActiveLock)
         enact state None "expire" [CL.Leg "expire" state.terms.authorizer state.terms.amount emptyMetadata]
@@ -209,13 +210,13 @@ template ActiveLock with
         enact state None "cancel" [CL.Leg "cancel" state.terms.authorizer state.terms.amount emptyMetadata]
           [] state.enactedRuleIds
       conditionalLock_amendImpl self arg = do
-        now <- getTime
-        assertMsg "cannot amend at or after expiry" (now < state.terms.expiresAt)
+        beforeExpiry <- isLedgerTimeLT state.terms.expiresAt
+        assertMsg "cannot amend at or after expiry" beforeExpiry
         requireActors "amendment requires unanimity" (consent state) arg.actors
         assertMsg "amendment cannot change authorizer or instrument" $
           arg.newTerms.authorizer == state.terms.authorizer &&
           arg.newTerms.instrumentId == state.terms.instrumentId
-        validateTerms referenceLimits state.terms.instrumentId.admin now arg.newTerms
+        validateTerms referenceLimits state.terms.instrumentId.admin arg.newTerms
         assertMsg "amendment cannot reduce the locked amount" (arg.newTerms.amount >= state.terms.amount)
         assertMsg "amendment cannot reuse an enacted rule ID" $
           all (\r -> r.id `notElem` state.enactedRuleIds) arg.newTerms.rules

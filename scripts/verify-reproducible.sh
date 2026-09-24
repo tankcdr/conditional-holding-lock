@@ -9,7 +9,7 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 . "$ROOT/scripts/lib/java.sh"
 conditional_lock_java
 
-PINNED_INTERFACE_ID="cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac"
+PINNED_INTERFACE_ID="ed3faf9fa8b9bd68789715451c133695acada4247c3e57709268a5dc0b2b5e61"
 
 package_list="$(python3 -c "
 import sys

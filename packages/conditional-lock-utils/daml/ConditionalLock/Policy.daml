@@ -275,16 +275,60 @@ hashPreimage algorithm preimage =
 
 -- | Guard evaluation (CIP section 3.5). A rule is enactable when some alternative
 -- is satisfied, and an alternative is satisfied when every guard in `allOf` is.
-satisfied : Time -> [Party] -> Witness -> [Alternative] -> Bool
-satisfied now actors witness = any (all leaf . (.allOf))
+--
+-- Time guards are evaluated as bounds on ledger time (`isLedgerTimeGE` and
+-- `isLedgerTimeLT`), never by reading it with `getTime`. Reading ledger time
+-- would limit the delay between preparing and submitting a transaction to one
+-- minute (CIP-0062); a bound does not, so an externally signed enactment can
+-- use the full prepare-to-submit window. `Guard_After t` holds iff ledger time
+-- is at or after `t`; `Guard_Before t` holds iff ledger time is strictly before
+-- `t`. Evaluation short-circuits left to right, as `any` and `all` do, so only
+-- the bounds actually consulted constrain the transaction.
+satisfied : [Party] -> Witness -> [Alternative] -> Update Bool
+satisfied actors witness = anyA (allA leaf . (.allOf))
   where
     leaf = \case
       Guard_Preimage algorithm digest ->
-        any (\p -> hashPreimage algorithm p == Some digest) witness.preimages
-      Guard_After t -> now >= t
-      Guard_Before t -> now < t
+        pure (any (\p -> hashPreimage algorithm p == Some digest) witness.preimages)
+      Guard_After t -> isLedgerTimeGE t
+      Guard_Before t -> isLedgerTimeLT t
       Guard_Parties parties threshold ->
-        length (filter (`elem` actors) (dedup parties)) >= threshold
+        pure (length (filter (`elem` actors) (dedup parties)) >= threshold)
+
+-- | `any` and `all` over a monadic predicate, short-circuiting left to right.
+anyA : Action m => (a -> m Bool) -> [a] -> m Bool
+anyA _ [] = pure False
+anyA f (x :: xs) = do
+  b <- f x
+  if b then pure True else anyA f xs
+
+allA : Action m => (a -> m Bool) -> [a] -> m Bool
+allA _ [] = pure True
+allA f (x :: xs) = do
+  b <- f x
+  if b then allA f xs else pure False
+
+-- | `now + d <= t`, where `now` is ledger time, stated as the bound
+-- `now <= t - d`. Total over every `Time` and `RelTime`: when `t - d` falls
+-- outside the `Time` range the answer is known without consulting ledger time,
+-- and `isLedgerTimeLE` is never asked about `maxBound`, which it rejects.
+ledgerTimePlusIsAtMost : RelTime -> Time -> Update Bool
+ledgerTimePlusIsAtMost d t
+  | d >= zero = if subTime t minBound < d then pure False else
+      let bound = t `addRelTime` negate d
+      in if bound == maxBound then pure True else isLedgerTimeLE bound
+  | d <= subTime t maxBound = pure True
+  | otherwise = isLedgerTimeLE (t `addRelTime` negate d)
+  where zero = microseconds 0
+
+-- | `t <= now + d`, where `now` is ledger time, stated as the bound
+-- `now >= t - d`. Total in the same way as `ledgerTimePlusIsAtMost`.
+ledgerTimePlusIsAtLeast : RelTime -> Time -> Update Bool
+ledgerTimePlusIsAtLeast d t
+  | d >= zero = if subTime t minBound < d then pure True else isLedgerTimeGE (t `addRelTime` negate d)
+  | d < subTime t maxBound = pure False
+  | otherwise = isLedgerTimeGE (t `addRelTime` negate d)
+  where zero = microseconds 0
 
 validGuard : Guard -> Bool
 validGuard = \case
@@ -327,14 +371,24 @@ validOutcome l amount (Outcome_Release fixedLegs receivers) =
   validLegs l fixedLegs && sum (map (.amount) fixedLegs) <= amount &&
   receivers == dedup receivers && length receivers <= l.maxLegs && all validAccount receivers
 
-validateTerms : Limits -> Party -> Time -> LockTerms -> Update ()
-validateTerms l admin now terms = do
+-- | Terms validation (CIP section 3.8). The time checks are bounds on ledger
+-- time rather than reads of it, for the reason given at `satisfied`:
+-- `requestedAt < now` is `isLedgerTimeGT requestedAt`, and
+-- `now + minDuration <= expiresAt <= now + maxDuration` is
+-- `expiresAt - maxDuration <= now <= expiresAt - minDuration`.
+validateTerms : Limits -> Party -> LockTerms -> Update ()
+validateTerms l admin terms = do
   assertMsg "instrument admin must match factory" (terms.instrumentId.admin == admin)
   assertMsg "authorizer must be a regular account" (validAccount terms.authorizer)
   assertMsg "amount must be positive" (terms.amount > 0.0)
-  assertMsg "requestedAt must be in the past" (terms.requestedAt < now)
-  assertMsg "expiry must be within the advertised duration bounds" $
-    terms.expiresAt >= now `addRelTime` l.minDuration && terms.expiresAt <= now `addRelTime` l.maxDuration
+  -- No ledger time is after `maxBound`, and `isLedgerTimeGT` rejects it.
+  requestedInPast <- if terms.requestedAt == maxBound then pure False
+    else isLedgerTimeGT terms.requestedAt
+  assertMsg "requestedAt must be in the past" requestedInPast
+  atLeastMin <- ledgerTimePlusIsAtMost l.minDuration terms.expiresAt
+  atMostMax <- if not atLeastMin then pure False
+    else ledgerTimePlusIsAtLeast l.maxDuration terms.expiresAt
+  assertMsg "expiry must be within the advertised duration bounds" (atLeastMin && atMostMax)
   assertMsg "at most max-rules rules" (length terms.rules <= l.maxRules)
   let ids = map (.id) terms.rules
   assertMsg "rule IDs must be unique, non-empty, and free of /" (dedup ids == ids && all noSlash ids)

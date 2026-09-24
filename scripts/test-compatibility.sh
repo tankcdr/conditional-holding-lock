@@ -9,7 +9,7 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 . "$ROOT/scripts/lib/sandbox.sh"
 conditional_lock_java
 "$ROOT/scripts/build-dars.sh"
-DAR="$ROOT/packages/conditional-lock-test/.daml/dist/conditional-lock-test-1.0.0.dar"
+DAR="$ROOT/packages/conditional-lock-test/.daml/dist/conditional-lock-test-$(sed -n 's/^version: *//p' "$ROOT/packages/conditional-lock-test/daml.yaml").dar"
 networks=("$@")
 if [[ ${#networks[@]} -eq 0 ]]; then networks=(mainnet testnet); fi
 
