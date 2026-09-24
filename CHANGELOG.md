@@ -17,6 +17,10 @@ predates this rule and ships `*-1.0.0.dar`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-09-24
+
 ### Added
 
 - Recorded, sequential rule approvals (CIP round three). The interface gains `Approval`,
@@ -41,6 +45,20 @@ predates this rule and ships `*-1.0.0.dar`.
   unchanged.
 - Daml package versions follow the release version (see the versioning rule); all first-party
   packages are `0.2.0`.
+
+### Build inputs
+
+Daml SDK 3.5.2, Daml-LF 2.1, Splice release 0.8.1 (commit `fb3c8c8a`), built with
+`--explicit-serializable=yes --target=2.1`.
+
+### Package identity
+
+| Package | Package ID | Attached | Changed |
+| --- | --- | --- | --- |
+| `splice-api-token-conditional-lock-v1` | `ff9cd0184bcd2f3a88b0c8c1c74bcff94e49c7ff00c04e144b33f26f7266811e` | yes | yes |
+| `conditional-lock-utils` | `039623d083f47f6b45e6329977420aa745a87e3bdf074f2e65d5c1b64e4795dc` | yes | yes |
+| `conditional-lock-test-token` | `89a62772455accba2a673b3f7746961c0033855f8898c1320745a320c1313f18` | yes | yes |
+| `conditional-lock-test` | `802f51915da7fac03e439e4bd194bbaad8389dfc46837104317186986cd5d2cb` | no | yes |
 
 ## [0.1.0] - 2026-09-23
 
@@ -157,5 +175,6 @@ with `"attached": false` for the record.
 DAR signing is out of scope for this release — the SHA-256 values in the generated
 `conditional-lock-release.json` manifest are the only provenance.
 
-[Unreleased]: https://github.com/tankcdr/conditional-holding-lock/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tankcdr/conditional-holding-lock/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tankcdr/conditional-holding-lock/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tankcdr/conditional-holding-lock/releases/tag/v0.1.0
