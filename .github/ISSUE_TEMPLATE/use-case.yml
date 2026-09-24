@@ -1,0 +1,66 @@
+name: Use case or adoption interest
+description: Tell us about an application, registry or wallet that needs conditional locks.
+title: "Use case: "
+labels: ["use-case"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for weighing in. Concrete needs are what move this from a draft to a standard. Answer what applies; leave the rest blank.
+  - type: dropdown
+    id: role
+    attributes:
+      label: You are
+      options:
+        - Building or planning an application
+        - A registry operator (asset issuer)
+        - A wallet provider
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What you need to lock, what releases it, and who acts. For example HTLC leg, escrow with an arbiter, vesting, collateral, payment on attestation, or something else.
+    validations:
+      required: true
+  - type: textarea
+    id: assets
+    attributes:
+      label: Assets and registries
+      description: Which instruments and registries this involves.
+  - type: input
+    id: timeline
+    attributes:
+      label: Timeline
+      description: When you would need it in production.
+  - type: textarea
+    id: registry
+    attributes:
+      label: Registry operators - would you implement it?
+      description: What would make it cheap or expensive for you.
+  - type: textarea
+    id: wallet
+    attributes:
+      label: Wallet providers - what would you need?
+      description: To show a conditionally locked holding and how it can be released.
+  - type: textarea
+    id: essentials
+    attributes:
+      label: Essential and optional capabilities
+      description: Which you need (preimage guards, time guards, party thresholds, approvals from separate wallets, amount discretion, amendment) and which could go.
+  - type: dropdown
+    id: out-of-tree
+    attributes:
+      label: Would you use the package out of tree before it is a standard?
+      options:
+        - "Yes"
+        - "No, only a standard"
+        - Not sure
+  - type: checkboxes
+    id: public
+    attributes:
+      label: Evidence
+      options:
+        - label: You may list this use case, without contact details, in docs/adoption-evidence.md.
