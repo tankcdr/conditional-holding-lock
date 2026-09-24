@@ -50,7 +50,7 @@ export PATH="${HOME}/.dpm/bin:${PATH}"
 conditional_lock_java
 
 EXAMPLE_DIR="$ROOT/examples/devnet-escrow"
-EXAMPLE_DAR="$EXAMPLE_DIR/.daml/dist/conditional-lock-devnet-escrow-1.0.0.dar"
+EXAMPLE_DAR="$EXAMPLE_DIR/.daml/dist/conditional-lock-devnet-escrow-$(sed -n 's/^version: *//p' "$EXAMPLE_DIR/daml.yaml").dar"
 
 # The three first-party release DAR filenames, from dar_identity.py's own
 # PACKAGES tuple, so a version bump there does not have to be echoed here.

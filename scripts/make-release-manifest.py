@@ -44,6 +44,13 @@ def main():
                              "Lets the release recipe fail early, before the long test steps.")
     args = parser.parse_args()
 
+    # Canton will not vet two packages with the same name and version, so every
+    # release must carry its own version in daml.yaml and so in the DAR name.
+    stale = [f"{p} ({dar_identity.package_version(p)})" for p, _ in dar_identity.PACKAGES
+             if dar_identity.package_version(p) != args.version]
+    if stale:
+        raise SystemExit(f"daml.yaml version must equal the release version {args.version}: {', '.join(stale)}")
+
     if args.check_changelog_only:
         changelog_section(args.version)
         print(f"OK: CHANGELOG.md has a section for {args.version}")

@@ -8,12 +8,11 @@ registry, an application, or a wallet that did is the concrete answer.
 **The reference deployment does not satisfy the "adoption outside this repository" criterion.** The
 first row below is our own, run from this repository against a local participant. It exists so the
 table opens with a worked example rather than an empty header, and so the columns are demonstrated
-rather than described. It is not an adoption. Do not mark the distribution epic complete on it.
+rather than described. It is not an adoption.
 
 ## How to add a row
 
-Open a pull request against this file, or comment on
-[issue #18](https://github.com/tankcdr/conditional-holding-lock/issues/18) and we will add it. The
+Open an issue, or open a pull request against this file adding a row, and we will add it. The
 issue is the low-friction intake; this file is the record, because the CIP needs a citable URL that
 is versioned, reviewable, and diffable.
 
@@ -26,8 +25,7 @@ is a pull request, a commit, a demo recording, a blog post, or a generated evide
 
 | Date | Adopter | What was done | Network | Release tag | Interface package ID | Link or update IDs |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-09-22 | Long Run Advisory (this repository) | Escrowed DvP with a dispute window: the `settle` path enacted jointly by both counterparties before the deadline, and the arbiter's `award` path after it, from one set of `LockTerms` — two conditions, two outcomes, one pool of funds. Run under wall-clock time, not the static time the rest of the proof suite uses. | LocalNet (isolated Canton 3.5.17 sandbox, the Testnet runtime) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-reference-evidence.json](runbook/localnet-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
-| 2026-09-22 | Long Run Advisory (this repository) | The same escrowed DvP with a dispute window, run again on the Splice LocalNet stack at the release Canton Mainnet is running: a real participant behind a real synchronizer, with the Ledger API's authentication on, rather than an in-process sandbox. The `settle` path enacted 43 seconds before the deadline and the arbiter's `award` path 14 seconds after it. | LocalNet (Splice 0.8.0 / Canton 3.5.16, the Mainnet configuration) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-mainnet-0.8.0-reference-evidence.json](runbook/localnet-mainnet-0.8.0-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
+| 2026-09-22 | Long Run Advisory (this repository) | The escrowed DvP with a dispute window, run on the Splice LocalNet stack at the release Canton Mainnet is running: a real participant behind a real synchronizer, with the Ledger API's authentication on, rather than an in-process sandbox. The `settle` path enacted 43 seconds before the deadline and the arbiter's `award` path 14 seconds after it. | LocalNet (Splice 0.8.0 / Canton 3.5.16, the Mainnet configuration) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-mainnet-0.8.0-reference-evidence.json](runbook/localnet-mainnet-0.8.0-reference-evidence.json) — contract IDs for both paths; see "Update IDs" below |
 | 2026-09-22 | Long Run Advisory (this repository) | CIP-0112 DvP between registries, against **real Canton Coin**. The seller's TestTokenV2 holding is locked under the conditional lock as the delivery leg; the buyer pays real Amulet as the payment leg, allocated on both sides through the token standard and settled through Splice's own `ExternalPartyAmuletRules` settlement factory. One submission, two commands, one update: `SettlementFactory_SettleBatch` and `ConditionalLock_Enact` are the two root nodes of the same transaction. The buyer is hosted on a second participant. A second lock proves the expiry path under wall-clock time. | LocalNet (Splice 0.8.0 / Canton 3.5.16, the Mainnet configuration; two participants) | `unreleased` | `cc541d14181e265667ea06c6e738e2415881ec49f849474da63319fcfb10d5ac` | [localnet-mainnet-0.8.0-dvp-evidence.json](runbook/localnet-mainnet-0.8.0-dvp-evidence.json) — settlement update `12203d62133448c6a8b3c438c922c920718f2315fc1ffc84606b9b7666d00cc56f54`, expiry update `1220c198b80bad4b922d70f867857a985d2ed79f7f21393c4d19bee7cc3fe818044f` |
 | — | — | *pending a participant* | DevNet | — | — | — |
 
@@ -42,7 +40,7 @@ LEDGER_TOKEN=<oauth2-token> \
 ./scripts/devnet-reference.sh --network devnet --release v0.1.0
 ```
 
-The `v0.1.0` tag does not exist yet; use that form once the release is tagged. No DevNet participant was available when this was written. Standing one up is validator onboarding, which is its own exercise and out of proportion to one log row. The LocalNet row proves the mechanics; the DevNet row will prove the network.
+`v0.1.0` is tagged and released; the command above uses it as written. No DevNet participant was available when this was written. Standing one up is validator onboarding, which is its own exercise and out of proportion to one log row. The LocalNet row proves the mechanics; the DevNet row will prove the network.
 
 ## What you do not need
 

@@ -105,6 +105,9 @@ asPending result = case result.output of
 enactArg : Text -> [Party] -> CL.ConditionalLock_Enact
 enactArg id actors = CL.ConditionalLock_Enact id actors noWitness [] extra
 
+approveArg : Text -> [CL.Leg] -> [Party] -> CL.ConditionalLock_Approve
+approveArg id legs actors = CL.ConditionalLock_Approve id legs actors extra
+
 assertToken : Party -> ContractId V2.Holding -> V2.Account -> V2.InstrumentId -> Decimal -> Script ()
 assertToken party cid owner instrument amount = do
   Some token <- queryContractId party (coerceContractId cid : ContractId Token.Token)
@@ -378,6 +381,42 @@ test_pendingInstructionCannotPinFundsAfterExpiry = do
   assertToken e.alice refund terms.authorizer terms.instrumentId 100.0
   query @Impl.LockedHolding e.alice >>= (=== [])
 
+-- Expiry is a bound on ledger time, probed at static ledger times one
+-- microsecond before `expiresAt` and exactly at it: every pre-expiry action is
+-- allowed strictly before, expiry is allowed at and after, and each rejection
+-- is pinned to its own check.
+test_expiryIsALedgerTimeBoundAtExactExpiry : Script ()
+test_expiryIsALedgerTimeBoundAtExactExpiry = do
+  e <- setup ()
+  let terms = termsFor e
+  let allActors = [e.alice, e.bob, e.arbiter]
+  (early, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  (late, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  pendingEarly <- lock e.rulesA terms [e.alice] >>= asPending
+  pendingLate <- lock e.rulesA terms [e.alice] >>= asPending
+  let amended = terms with
+        requestedAt = terms.expiresAt `addRelTime` seconds (-2)
+        expiresAt = terms.expiresAt `addRelTime` days 1
+
+  setTime (terms.expiresAt `addRelTime` microseconds (-1))
+  failsBecause (actAs [e.alice]) "a lock cannot expire before its expiry" $
+    exerciseCmd late $ CL.ConditionalLock_Expire [e.alice] extra
+  _ <- submit e.arbiter $ exerciseCmd early $ enactArg "release" [e.arbiter]
+  _ <- submit e.bob $ exerciseCmd pendingEarly $
+    CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+
+  setTime terms.expiresAt
+  failsBecause (actAs [e.arbiter]) "rules cannot fire at or after expiry" $
+    exerciseCmd late $ enactArg "release" [e.arbiter]
+  failsBecause (actAs allActors) "cannot amend at or after expiry" $
+    exerciseCmd late $ CL.ConditionalLock_Amend amended [] allActors extra
+  failsBecause (actAs [e.bob]) "cannot accept at or after expiry" $
+    exerciseCmd pendingLate $ CL.ConditionalLockInstruction_Accept (account e.bob) [e.bob] extra
+  result <- submit e.alice $ exerciseCmd late $ CL.ConditionalLock_Expire [e.alice] extra
+  case result.output of
+    CL.ConditionalLockResult_Enacted [] [out] None -> assertToken e.alice out terms.authorizer terms.instrumentId 100.0
+    _ -> abort "expected authorizer refund at exact expiry"
+
 test_cancelRequiresEveryNamedParty : Script ()
 test_cancelRequiresEveryNamedParty = do
   e <- setup ()
@@ -470,17 +509,43 @@ test_malformedTermsAndFundingFailWithoutConsumingInputs = do
     CL.ConditionalLockFactory_Lock terms [input, input] [e.alice, e.bob] extra
   assertToken e.alice input terms.authorizer terms.instrumentId 100.0
 
+-- | A test-only carrier so `satisfied`, which bounds ledger time and so lives
+-- in `Update`, can be evaluated at the ledger time of a submission.
+template GuardProbe
+  with
+    operator : Party
+  where
+    signatory operator
+
+    nonconsuming choice ProbeSatisfied : Bool
+      with
+        actors : [Party]
+        alternatives : [CL.Alternative]
+      controller operator
+      do satisfied actors noWitness alternatives
+
+-- Time guards are bounds on ledger time, not reads of it, so they are probed
+-- by submitting at static ledger times on either side of the guard time `t`:
+-- one microsecond before `t`, and exactly at `t`.
 test_guardsUseInclusiveAfterAndExclusiveBefore : Script ()
 test_guardsUseInclusiveAfterAndExclusiveBefore = do
   e <- setup ()
+  probe <- submit e.arbiter $ createCmd (GuardProbe e.arbiter)
+  let t = e.now `addRelTime` hours 1
   -- Deliberately unsatisfiable first alternative makes the inclusive-After and
   -- exclusive-Before boundary observable against the second alternative.
-  let alternatives = [CL.Alternative [CL.Guard_After e.now, CL.Guard_Before e.now],
-                      CL.Alternative [CL.Guard_After e.now, CL.Guard_Parties [e.arbiter] 1]]
+  let alternatives = [CL.Alternative [CL.Guard_After t, CL.Guard_Before t],
+                      CL.Alternative [CL.Guard_After t, CL.Guard_Parties [e.arbiter] 1]]
+  let before = alt (CL.Guard_Before t)
   assert (validAlternatives referenceLimits alternatives)
-  satisfied e.now [e.arbiter] noWitness alternatives === True
-  satisfied e.now [] noWitness alternatives === False
-  satisfied (e.now `addRelTime` seconds (-1)) [e.arbiter] noWitness alternatives === False
+  let evaluate actors alts = submit e.arbiter $ exerciseCmd probe (ProbeSatisfied actors alts)
+  setTime (t `addRelTime` microseconds (-1))
+  evaluate [e.arbiter] alternatives >>= (=== False)
+  evaluate [e.arbiter] before >>= (=== True)
+  setTime t
+  evaluate [e.arbiter] alternatives >>= (=== True)
+  evaluate [] alternatives >>= (=== False)
+  evaluate [e.arbiter] before >>= (=== False)
   validAlternatives referenceLimits [] === False
   validAlternatives referenceLimits [CL.Alternative []] === False
   validGuard (CL.Guard_Parties [e.alice, e.alice] 2) === False

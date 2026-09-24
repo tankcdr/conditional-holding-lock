@@ -27,9 +27,9 @@ FIRST_PARTY_RELEASE_PACKAGES = [
 ]
 
 # Canton contract IDs observed in this repo's own evidence
-# (docs/runbook/localnet-reference-evidence.json) are "00" followed by a long
-# run of lowercase hex. This is deliberately not over-fit to one ledger's
-# exact length: it is a shape check, not an equality check.
+# (docs/runbook/localnet-mainnet-0.8.0-reference-evidence.json) are "00"
+# followed by a long run of lowercase hex. This is deliberately not over-fit
+# to one ledger's exact length: it is a shape check, not an equality check.
 CONTRACT_ID_RE = re.compile(r"^00[0-9a-f]{100,}$")
 # Canton 3.5 update IDs on this ledger are a "1220" multihash prefix followed
 # by 64 hex characters.

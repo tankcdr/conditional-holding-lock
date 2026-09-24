@@ -7,18 +7,40 @@ All notable changes to the code in this repository are recorded here. The format
 **This is not the CIP changelog.** The CIP's own revision history is a different document, lives
 in the CIP text under `docs/cip/`, and is owned separately. Do not merge the two.
 
-**Versioning rule.** The release version lives in three places only: the git tag, this file, and
-the generated release manifest `conditional-lock-release.json`. The four first-party Daml packages
-keep `version: 1.0.0` in their `daml.yaml`. A Daml-LF package ID is a content hash over the package
-name, its version, the LF version, the package IDs of its dependencies, and the serialized module
-ASTs, so bumping the version field would change the interface package ID — and that ID is pinned
-in Splice's `daml/dars.lock` on the proposed branch of PR 7294 (not yet on Splice `main`). The
-release version therefore moves in the tag while the
-package coordinates stay still.
+**Versioning rule.** Every first-party Daml package carries the release version in its
+`daml.yaml`, and so in its DAR filename: release `v0.2.0` ships `*-0.2.0.dar`. Canton will not vet two
+packages with the same name and version, so a changed package under an unchanged version cannot be
+uploaded beside the previous release. `just release` refuses a version that differs from any
+`daml.yaml`. The interface package on the Splice branch of PR 7294 carries the same version, so both
+copies keep one package ID. `1.0.0` is reserved for a deliberate stable release. Release `v0.1.0`
+predates this rule and ships `*-1.0.0.dar`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Recorded, sequential rule approvals (CIP round three). The interface gains `Approval`,
+  `ConditionalLockView.approvals`, the `ConditionalLock_Approve` choice with
+  `conditionalLock_approveExtraObservers` and `conditionalLock_approveImpl`, and `CLA_Approve`.
+  `ConditionalLock_Enact` counts `actors` together with the approvers recorded for exactly its
+  `(ruleId, legs)`, for `Guard_Parties` and for the enactor requirement, so a threshold can be met
+  one party at a time and a venue can enact a fully approved settlement alone.
+  `conditional-lock-utils` adds the approval bookkeeping (`approve`, `actingParties`,
+  `approversFor`, `recordApproval`, `dropApprovals`, `clearApprovals`, `approvalParties`,
+  `hasPartiesGuard`); the TestTokenV2 adapter implements the choice, keeps approvals of unfired
+  rules across continuations, drops a fired rule's approvals, and clears them on amendment. The
+  off-ledger API gains `POST /registry/conditional-lock/v1/{lockContractId}/choice-contexts/approve`.
+  The interface package ID changes.
+
+### Changed
+
+- Time checks in `conditional-lock-utils` and the TestTokenV2 adapter are bounds on ledger time
+  (`isLedgerTimeGE`, `isLedgerTimeLT`) instead of reads with `getTime`, which limited the delay
+  between preparing and submitting a transaction to one minute (CIP-0062). `satisfied` now returns
+  `Update Bool` and `validateTerms` no longer takes a `Time`. Accept and reject boundaries are
+  unchanged.
+- Daml package versions follow the release version (see the versioning rule); all first-party
+  packages are `0.2.0`.
 
 ## [0.1.0] - 2026-09-23
 

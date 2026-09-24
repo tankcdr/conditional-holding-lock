@@ -82,7 +82,7 @@ echo "==> building the quickstart"
 (cd "$ROOT/docs/quickstart" && dpm build)
 
 echo "==> running the quickstart script"
-dpm script --dar "$ROOT/docs/quickstart/.daml/dist/conditional-lock-quickstart-1.0.0.dar" \
+dpm script --dar "$ROOT/docs/quickstart/.daml/dist/conditional-lock-quickstart-$(sed -n 's/^version: *//p' "$ROOT/docs/quickstart/daml.yaml").dar" \
   --script-name Quickstart:quickstart --ledger-host 127.0.0.1 --ledger-port "$CL_LEDGER_PORT" \
   --static-time --upload-dar yes
 

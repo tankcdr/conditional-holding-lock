@@ -15,55 +15,45 @@
 
 ## Abstract
 
-This CIP adds one interface package to the Canton Network Token Standard, `splice-api-token-conditional-lock-v1`, letting a `Holding`'s holder attach a release policy to it: a set of rules, each pairing a condition with an outcome, unlock to the authorizer or release to fixed legs plus bounded discretion. A rule fires at most once and may consume part of the amount, leaving the remainder locked until expiry, when it only unlocks to the authorizer. The authorizer and every named party can cancel or amend the lock by unanimous consent.
+This CIP adds one interface package to the Canton Network Token Standard, `splice-api-token-conditional-lock-v1`, letting a holder attach a release policy to a `Holding`: rules pairing a condition with an outcome, an unlock to the authorizer or a release to fixed legs plus bounded discretion. A rule fires at most once and may consume part of the amount; the remainder stays locked until expiry, when it only unlocks to the authorizer. The authorizer and every named party can cancel or amend the lock by unanimous consent.
 
-The package defines a factory, a two-step approval instruction, the lock interface (`Enact`, `Expire`, `Cancel`, `Amend`), the holding representation while locked, event reporting through the CIP-0112 `EventLog`, and off-ledger registry endpoints. It modifies no existing package: any registry can implement it, and any V1 or V2 wallet already renders the locked holding correctly.
+The package defines a factory, a two-step approval instruction, the lock interface (`Enact`, `Approve`, `Expire`, `Cancel`, `Amend`), the locked holding representation, `EventLog` reporting, and registry endpoints, and modifies no existing package: any registry can implement it, and any V2 wallet, or V1 wallet where the registry also implements `HoldingV1`, already renders the locked holding as locked.
 
 ## Motivation
 
-The token standard describes locks but does not let anyone create one. `Holding.lock` in CIP-0056 and CIP-0112 is view data: `holders`, `expiresAt`, `expiresAfter`, `context`. There is no standard choice to lock a holding, no standard statement of who may release it, and no standard release condition. Canton Coin exposes a registry-specific `LockedAmulet` whose unlock requires the owner and every lock holder to act together, with a timeout for the owner. No other registry is obliged to offer anything comparable, and no application can write one lock flow that works across registries.
+The token standard describes locks but lets no one create one: `Holding.lock` (CIP-0056, CIP-0112) is view data, and no standard choice locks a holding under a release condition. CIP-0112 allocations hold funds for a settlement their executors perform, and the draft Super Validator and Featured App locking CIP (canton-foundation/cips#250) locks Canton Coin for an unlock its controllers approve; neither lets an application state a condition the lock's signatories check, in a form every registry implements alike. Canton Coin's `LockedAmulet` is registry-specific, and no other registry is obliged to offer an equivalent, so no lock flow works across registries.
 
 ### The use cases
 
-**HTLC cross-chain legs.** A hash time-locked swap is atomic only if the Canton leg releases on the same preimage the other chain checks. *Who needs it:* market makers and bridge operators quoting a Canton instrument against an asset on Bitcoin, an EVM chain, or Solana, and the registries they quote; today the Canton side is a registry-specific contract or an off-ledger release.
+**HTLC cross-chain legs.** A hash time-locked swap is atomic only if the Canton leg releases on the same preimage the other chain checks. *Who needs it:* market makers, bridge operators, and registries pricing Canton instruments against Bitcoin, EVM, or Solana assets.
 
-**Escrow with a decision-maker.** Funds are locked by one party and awarded, in whole or part, by a named arbiter who is neither counterparty. *Who needs it:* marketplaces, freelance and RWA platforms, and dispute-resolution services, which today take title into an application-owned template, losing the holder's portfolio view.
+**Escrow with a decision-maker.** Funds locked by one party are awarded, in whole or part, by an arbiter who is neither counterparty. *Who needs it:* marketplaces, freelance and RWA platforms, and dispute services, which today take title into application templates.
 
-**Vesting and tranche release.** One lock releases a fixed fraction at each of several dates and continues with the remainder, with no party choosing an amount or destination. *Who needs it:* token issuers paying contributors, investors, or grantees under a published schedule, and wallets that must show what is locked and when it opens.
+**Vesting and tranche release.** One lock releases a fixed fraction on each of several dates; no party chooses an amount or destination. *Who needs it:* issuers with published schedules, and the wallets that display them.
 
-**Collateral with top-up and default.** A pledge the pledgee releases on repayment and may claim after maturity, with amount and maturity both parties can adjust by consent. *Who needs it:* lending and margin applications, and custodians who need collateral to stay in the pledgor's account for reporting and tax treatment.
+**Collateral with top-up and default.** A pledge the pledgee releases on repayment and may claim after maturity, with amount and maturity adjustable by mutual consent. *Who needs it:* lending, margin, and custody applications keeping collateral in the pledgor's account.
 
-**Conditional payment on attestation.** Payment released to the payee when a named attestor acts, and only before a deadline. *Who needs it:* invoice financing, parametric insurance, and milestone payments, and any registry asked to support "pay on proof of delivery" without becoming a party to the delivery.
+**Conditional payment on attestation.** Payment released to the payee when a named attestor acts, and only before a deadline. *Who needs it:* invoice financing, parametric insurance, and milestone payments.
 
 ### What token standard V2 already covers
 
-Token standard V2 (CIP-0112) allocations already cover the following, and this CIP does not re-cover them.
-
-**Counterparties as their own executors.** `SettlementInfo.executors` is a party list configured per settlement, not a fixed third-party role, per CIP-0112 "Configurable Executors and Batch Settlement via SettlementFactory". A delivery versus payment between two counterparties, with both as the executors, needs no third party and works across registries. Same-ledger and cross-registry DvP without a venue is a V2 feature today.
-
-**Venue-executed matched trades.** Where a venue matches orders, CIP-0112 "Improved User Flows with Trusted Venues" covers writing the executed trade to the chain with only the executor as signatory.
-
-**Pre-funding.** CIP-0112 "Committed Allocations for Prefunded Trading and Iterated Settlement" covers funds committed ahead of the trade: `AllocationSpecification.committed` holds the funds until the executors settle or cancel, the deadline passes, or the admin expires the allocation.
-
-**Executor-chosen legs and iterated settlement.** An allocation need not fix its legs in advance, per CIP-0112 "Committed Allocations for Prefunded Trading and Iterated Settlement": with iterated settlement enabled, the executors supply `extraTransferLegSides` at settlement, and the result is a new allocation carrying the change, so an off-chain order book settles repeatedly against one funded position with no custom contract code.
-
-None of these needs a conditional lock, and this CIP is not an alternative to any of them.
+CIP-0112 allocations already cover delivery versus payment with both counterparties as executors, because `SettlementInfo.executors` is configured per settlement ("Configurable Executors and Batch Settlement via SettlementFactory"); venue-executed matched trades, where creating the allocation authorizes the trade ("Improved User Flows with Trusted Venues"); pre-funding through `AllocationSpecification.committed` ("Committed Allocations for Prefunded Trading and Iterated Settlement"); and executor-chosen legs through `extraTransferLegSides`, settling repeatedly against one funded position ("Committed Allocations and Iterated Settlement"). None of these needs a conditional lock, and this CIP replaces none of them.
 
 ### What token standard V2 cannot express
 
-1. **Release conditioned on a fact the lock's signatories check, rather than on a party acting.** A preimage or a point in ledger time is checked by the signatories at release, not decided by a party. An allocation's `settlementDeadline` only bounds when parties may act, never itself releasing anything.
-2. **More than one outcome over the same locked funds.** A lock carries a list of rules over one pool of funds, each with its own guard and outcome. Per CIP-0112 "Committed Allocations for Prefunded Trading and Iterated Settlement", an allocation authorizes one settlement whose legs the executors may re-choose, not alternative outcomes.
-3. **Discretion over amounts bounded by the terms, not by the settlement role.** A lock can give amount discretion to a party with no other power over the funds, gated on a guard and bound to a receiver list fixed at creation. In an allocation, only the executor set chooses amounts, and its receivers (`TransferLegSide.otherside`) are supplied at settlement, not declared in the allocation.
-4. **Partial consumption governed by the rule that fired.** A lock's continuation is determined by the rule that fired: it consumes exactly the legs released and continues without that rule (section 3.6). Per CIP-0112 "Committed Allocations for Prefunded Trading and Iterated Settlement", an allocation's iterated settlement instead returns the change to a new allocation whose split the executors choose.
-5. **Amendment by unanimous consent.** `Amend` replaces the terms with the consent of the authorizer and every named party, adjusting the locked amount and requiring newly introduced receivers to act in the same transaction (section 3.6). Per CIP-0112 "Topping up Allocations", executors may rebalance a committed allocation's funding, but the authorizer cannot alter the legs or deadline, and funding changes are the executors' to make, not the affected parties'.
+1. **Release on a fact, not on a party acting.** The lock's signatories check a preimage or a point in ledger time at release; an allocation's `settlementDeadline` only bounds when parties may act.
+2. **Several outcomes over the same funds.** A lock carries several rules over one pool, each with its own guard and outcome; an allocation authorizes one settlement whose legs the executors may re-choose.
+3. **Amount discretion bounded by the terms.** A lock can give amount discretion to a party with no other power over the funds, gated on a guard and bound to receivers fixed at creation; in an allocation only the executors, under iterated settlement, choose amounts and receivers (`TransferLegSide.otherside`) at settlement.
+4. **Partial consumption governed by the rule that fired.** A lock releases exactly the rule's legs and continues without that rule (section 3.6); iterated settlement returns the change to a new allocation whose split the executors choose.
+5. **Amendment by unanimous consent.** `Amend` replaces the terms, and may add funds, with the consent of the authorizer and every named party, new receivers acting in the same transaction (section 3.6); no allocation choice amends terms; iterated settlement tops up through a second allocation the executors merge (CIP-0112 "Topping up Allocations").
 
-Canton expresses this more cleanly than an account-model chain: a lock is an attribute of the holding, so funds never leave the authorizer's portfolio, and release paths are pre-authorized at creation so a receiver or arbiter can enact without the authorizer's signature.
+A lock is an attribute of the holding, so the funds stay in the authorizer's portfolio while locked, and release paths are authorized at creation, so an enactor needs no signature from the authorizer.
 
 ## Specification
 
 ### 1. Package
 
-New Daml package `splice-api-token-conditional-lock-v1`, module `Splice.Api.Token.ConditionalLockV1`. Dependencies: `splice-api-token-metadata-v1` and `splice-api-token-holding-v2`. Build settings match the existing V2 packages (Daml-LF 2.1, explicit serializability). The package is added to the `token-standard` directory of Splice under the same license and versioning practice as the CIP-0112 packages.
+New Daml package `splice-api-token-conditional-lock-v1`, module `Splice.Api.Token.ConditionalLockV1`, depending on `splice-api-token-metadata-v1` and `splice-api-token-holding-v2`, built like the V2 packages (Daml-LF 2.1, explicit serializability) and added to Splice's `token-standard` directory under their license and versioning practice.
 
 ### 2. Data types
 
@@ -104,9 +94,11 @@ data Guard
       parties : [Party]
         -- ^ Unique list of parties.
       threshold : Int
-        -- ^ Satisfied when at least `threshold` of `parties` are among the enacting actors.
-        -- MUST satisfy 1 <= threshold <= length parties. A `threshold` of 1 expresses any
-        -- one of these parties.
+        -- ^ Satisfied when at least `threshold` of `parties` are among the acting parties
+        -- of `ConditionalLock_Enact`: its `actors` and the approvers recorded for the
+        -- enacted rule and legs (`ConditionalLockView.approvals`). MUST satisfy
+        -- 1 <= threshold <= length parties. A `threshold` of 1 expresses any one of
+        -- these parties.
   deriving (Eq, Ord, Show, Serializable)
 
 -- | One way a rule can become enactable. Satisfied when every guard in `allOf` is satisfied.
@@ -170,13 +162,27 @@ data Rule = Rule with
       -- A rule id that has been enacted under a `lockId` MUST NOT be reused in later
       -- terms for that lock, including after an amendment.
     enactors : [Party]
-      -- ^ Parties entitled to enact this rule. At least one MUST be among the actors.
-      -- MUST be non-empty and duplicate-free.
+      -- ^ Parties entitled to enact this rule. At least one MUST be among the acting
+      -- parties of `ConditionalLock_Enact`. MUST be non-empty and duplicate-free.
     anyOf : [Alternative]
       -- ^ Disjunction: the rule is enactable when at least one alternative is
       -- satisfied. MUST be non-empty. Registries advertise the maximum length as
       -- `max-alternatives-per-rule` (CIP section 3.8).
     outcome : Outcome
+  deriving (Eq, Ord, Show, Serializable)
+
+-- | Approval of one enactment of a rule, recorded under a lock by
+-- `ConditionalLock_Approve`.
+data Approval = Approval with
+    ruleId : Text
+      -- ^ The approved rule.
+    legs : [Leg]
+      -- ^ The approved enactor-supplied legs, in the order they are supplied to
+      -- `ConditionalLock_Enact.legs`. The approval counts only for an enactment of
+      -- `ruleId` with exactly these legs.
+    approvers : [Party]
+      -- ^ Non-empty, duplicate-free list of parties that approved, each in the rule's
+      -- `enactors` or in a `Guard_Parties` of its `anyOf`.
   deriving (Eq, Ord, Show, Serializable)
 
 -- | The release policy, provided by the authorizer's wallet.
@@ -209,7 +215,7 @@ data LockTerms = LockTerms with
       -- `splice.lfdecentralizedtrust.org/lock-context`.
   deriving (Eq, Show, Serializable)
 
--- | Result of instructing, enacting, expiring, cancelling, or amending a lock.
+-- | Result of instructing, enacting, approving, expiring, cancelling, or amending a lock.
 data ConditionalLockResult = ConditionalLockResult with
     output : ConditionalLockResult_Output
     authorizerChangeCids : [ContractId Holding]
@@ -228,6 +234,8 @@ data ConditionalLockResult_Output
         -- never by `ConditionalLock_Amend`.
   | ConditionalLockResult_Locked with
       lockCid : ContractId ConditionalLock
+        -- ^ The active lock. For `ConditionalLock_Approve`, the lock carrying the
+        -- recorded approval, under the same `lockId`.
       holdingCids : [ContractId Holding]
         -- ^ The locked holdings backing the lock. MAY be empty for registries that do
         -- not represent their holdings on-ledger.
@@ -303,13 +311,9 @@ interface ConditionalLockFactory where
 
 Rules:
 
-- The factory MUST validate `terms` as stated on `ConditionalLockFactory_Lock.terms` above.
-- The factory MUST also reject terms where any `Leg.meta` sets a key the registry is required to set (section 3.7).
-- The number of named parties MUST be within the advertised `max-named-parties` (section 3.8); registries whose lock representation bounds lock holders SHOULD set it to that bound.
-- **Receivers** and **named parties** are as defined on `LockTerms` (section 2).
-- Change holdings from the input holdings are reported in `ConditionalLockResult.authorizerChangeCids`, whatever the output. A rejected or withdrawn instruction returns the locked funds in `ConditionalLockResult_Failed.authorizerHoldingCids`.
+- The factory MUST validate `terms` as stated on `ConditionalLockFactory_Lock.terms`, which covers the named-party count and the reserved `Leg.meta` keys (section 3.7). Registries whose lock representation bounds lock holders SHOULD set `max-named-parties` to that bound.
 - If every receiver's `actors` already include the parties the registry requires, or the account holds a recognized standing pre-approval, the factory SHOULD complete in one step and return `ConditionalLockResult_Locked`.
-- Otherwise the factory MUST return `ConditionalLockResult_Pending` with a `ConditionalLockInstruction`, whose `pendingApprovals` names accounts still owed approval and whose `availableActions` reports who may give it. Input holdings SHOULD be locked to the parties the registry requires for `terms.authorizer` and the named parties while pending, with `expiresAt` set to `terms.expiresAt`.
+- Otherwise the factory MUST return `ConditionalLockResult_Pending` with a `ConditionalLockInstruction` whose `pendingApprovals` names the accounts still owed approval and whose `availableActions` reports who may give it. Input holdings SHOULD be locked to the parties the registry requires for `terms.authorizer` and the named parties while pending, with `expiresAt` set to `terms.expiresAt`.
 
 #### 3.2 `ConditionalLockInstruction`
 
@@ -414,7 +418,7 @@ interface ConditionalLockInstruction where
     do conditionalLockInstruction_withdrawImpl this self arg
 ```
 
-The registry assigns `lockId` when it creates the `ConditionalLockInstruction`; wallets use it to correlate an instruction across approvals, and it carries unchanged into `ConditionalLockView.lockId` once active (section 3.3). `ConditionalLockInstruction_Accept` MUST fail at or after `terms.expiresAt`. Registries MUST allow the authorizer to withdraw a pending instruction at or after `terms.expiresAt` regardless of approver action, so pending instructions cannot pin funds indefinitely, and MAY additionally permit the admin alone to withdraw then for cleanup, resolving to `Failed`.
+`lockId` is as stated on `ConditionalLockInstructionView.lockId`, and expiry as stated on `ConditionalLockInstruction_Accept` and `ConditionalLockInstruction_Withdraw`, so a pending instruction cannot pin funds indefinitely.
 
 #### 3.3 `ConditionalLock`
 
@@ -424,6 +428,9 @@ data ConditionalLockAction
   = CLA_Enact with
       ruleId : Text
         -- ^ The rule that can be enacted.
+  | CLA_Approve with
+      ruleId : Text
+        -- ^ The rule whose enactment can be approved.
   | CLA_Expire
   | CLA_Cancel
   | CLA_Amend
@@ -443,6 +450,12 @@ data ConditionalLockView = ConditionalLockView with
       -- ^ Ids of the rules already enacted under this `lockId`, across continuations
       -- and amendments. Wallets use it to validate a `ConditionalLock_Amend` before
       -- submitting; registries use it to enforce fire-once.
+    approvals : [Approval]
+      -- ^ Approvals recorded by `ConditionalLock_Approve`, at most one entry per
+      -- `(ruleId, legs)` and each party in at most one entry per rule. Registries MUST
+      -- retain the approvals of rules still in `terms.rules` across continuations, MUST
+      -- drop those of a rule when it fires, and MUST clear all of them on
+      -- `ConditionalLock_Amend`.
     holdingCids : [ContractId Holding]
       -- ^ The locked holdings backing this lock. MAY be empty for registries that do
       -- not represent their holdings on-ledger.
@@ -461,7 +474,9 @@ data ConditionalLockView = ConditionalLockView with
       -- `CLA_Enact` has one entry per rule in `terms.rules`. Presence means the rule
       -- exists and the listed groups are entitled to enact it, not that any of its
       -- alternatives is currently satisfied; wallets evaluate `anyOf` themselves
-      -- against ledger time and the witness they hold.
+      -- against ledger time and the witness they hold. `CLA_Approve` has one entry per
+      -- rule with a `Guard_Parties` in its `anyOf`, one group per party entitled
+      -- to approve it.
     meta : Metadata
   deriving (Eq, Show, Serializable)
 
@@ -472,6 +487,7 @@ interface ConditionalLock where
   conditionalLock_expireImpl : ContractId ConditionalLock -> ConditionalLock_Expire -> Update ConditionalLockResult
   conditionalLock_cancelImpl : ContractId ConditionalLock -> ConditionalLock_Cancel -> Update ConditionalLockResult
   conditionalLock_amendImpl : ContractId ConditionalLock -> ConditionalLock_Amend -> Update ConditionalLockResult
+  conditionalLock_approveImpl : ContractId ConditionalLock -> ConditionalLock_Approve -> Update ConditionalLockResult
 
   -- | Choice observers for `ConditionalLock_Enact`. `ConditionalLock_Enact`'s
   -- arguments include `witness.preimages`, so every choice observer learns every
@@ -497,16 +513,25 @@ interface ConditionalLock where
   -- the current terms together with those introduced by `newTerms`.
   conditionalLock_amendExtraObservers : ConditionalLock_Amend -> [Party]
 
+  -- | Choice observers for `ConditionalLock_Approve`. Usually the named parties of
+  -- the current terms, which observe the lock the choice replaces. It MUST be total
+  -- and MUST NOT fail; a `ruleId` that is not in `terms.rules` MUST yield the empty
+  -- list and let the body reject the exercise.
+  conditionalLock_approveExtraObservers : ConditionalLock_Approve -> [Party]
+
   nonconsuming choice ConditionalLock_Enact : ConditionalLockResult
-    -- ^ Fire one rule. Implementations MUST fail if ledger time is at or after
-    -- `terms.expiresAt`; if no party in the rule's `enactors` is among `actors`; if
-    -- no alternative in the rule's `anyOf` is satisfied (CIP section 3.5); or if
-    -- `legs` are not valid for the outcome (CIP section 3.6).
+    -- ^ Fire one rule. The acting parties are `actors` together with the approvers
+    -- recorded in `approvals` for exactly this `ruleId` and `legs`. Implementations
+    -- MUST fail if ledger time is at or after `terms.expiresAt`; if no party in the
+    -- rule's `enactors` is among the acting parties; if no alternative in the rule's
+    -- `anyOf` is satisfied (CIP section 3.5); or if `legs` are not valid for the
+    -- outcome (CIP section 3.6).
     with
       ruleId : Text
       actors : [Party]
-        -- ^ MUST include at least one of the rule's `enactors`.
-        -- Implementations MUST check these parties to avoid unauthorized enactment.
+        -- ^ Together with the recorded approvers, MUST include at least one of the
+        -- rule's `enactors`. Implementations MUST check these parties to avoid
+        -- unauthorized enactment.
       witness : Witness
       legs : [Leg]
         -- ^ Enactor-supplied legs. MUST be empty unless the rule's outcome is an
@@ -550,8 +575,8 @@ interface ConditionalLock where
   nonconsuming choice ConditionalLock_Amend : ConditionalLockResult
     -- ^ Replace the terms, optionally adding funds, with the consent of every named
     -- party of the current terms and the authorizer. Result is `Locked` with the new
-    -- lock, which retains `lockId`. Implementations MUST fail at or after the
-    -- current `terms.expiresAt`.
+    -- lock, which retains `lockId` and carries no `approvals`. Implementations MUST
+    -- fail at or after the current `terms.expiresAt`.
     --
     -- An amendment MUST NOT return `Pending`: every approval that `newTerms`
     -- introduces MUST be given in the amending transaction, so `actors` MUST also
@@ -581,165 +606,166 @@ interface ConditionalLock where
     observer conditionalLock_amendExtraObservers this arg
     controller actors
     do conditionalLock_amendImpl this self arg
+
+  nonconsuming choice ConditionalLock_Approve : ConditionalLockResult
+    -- ^ Record an approval of one enactment of a rule, counted by
+    -- `ConditionalLock_Enact`. Result is `Locked`, with a new `lockCid` under the same
+    -- `lockId`. The recorded approvers are the parties in `actors` that are in the rule's
+    -- `enactors` or in a `Guard_Parties` of its `anyOf`; approving the same
+    -- `(ruleId, legs)` again adds them to that approval. Approvals are irrevocable, and
+    -- a party approves at most one list of legs per rule. Implementations MUST fail if
+    -- ledger time is at or after `terms.expiresAt`; if `ruleId` is not in
+    -- `terms.rules`; if the rule has no `Guard_Parties`; if no party in `actors` would
+    -- be recorded that is not already recorded for `(ruleId, legs)`; if a party to be
+    -- recorded has approved the rule with other legs; or if `legs` are not valid for
+    -- the outcome (CIP section 3.6).
+    with
+      ruleId : Text
+      legs : [Leg]
+        -- ^ The enactor-supplied legs approved, under the same constraints as
+        -- `ConditionalLock_Enact.legs`; so empty for an `Outcome_Unlock` and for an
+        -- `Outcome_Release` with empty `receivers`.
+      actors : [Party]
+        -- ^ The parties approving. Implementations MUST check these parties to avoid
+        -- unauthorized approval.
+      extraArgs : ExtraArgs
+    observer conditionalLock_approveExtraObservers this arg
+    controller actors
+    do conditionalLock_approveImpl this self arg
 ```
 
-The choices are nonconsuming, following CIP-0112, so that implementations control consumption. On success, implementations MUST archive the `ConditionalLock` and the backing holdings in the same transaction, creating a continuation lock and holdings when funds remain.
+The choices are nonconsuming, following CIP-0112, so that implementations control consumption. On success, implementations MUST archive the `ConditionalLock` and the backing holdings in the same transaction, creating a continuation lock and holdings when funds remain; `Approve` instead replaces the lock under the same `lockId`, and clients use the returned `lockCid`. The continuation keeps `lockId`, `enactedRuleIds`, and the approvals of the rules that remain.
 
 The signatories of a `ConditionalLock` MUST include the registry admin, the parties the registry requires to move funds out of `terms.authorizer`, and, for every approved receiver account, the parties that gave that approval (section 3.2), with the account's other parties as observers; guards are therefore checked by those parties at enactment, and the enactor supplies the `witness` without being trusted to evaluate it.
-
-`ConditionalLockView.enactedRuleIds` is the registry's record of fire-once across continuations and amendments.
 
 #### 3.4 Holding representation while locked
 
 A registry representing holdings on-ledger MUST, while a lock is active, represent the locked funds as the `Holding`s in `holdingCids`, in `terms.authorizer`, summing to `terms.amount`, with `lock` set on each to:
 
-- `holders`: the named parties of the terms (`LockTerms`, section 2); if none besides the authorizer, `holders` is the registry admin alone;
+- `holders`: the named parties of the terms (`LockTerms`, section 2), or the registry admin alone if there are none;
 - `expiresAt = Some terms.expiresAt`;
 - `expiresAfter = None`;
 - `context`: a short human-readable description, e.g. `hashlock to <receiver>` or `vesting, 4 tranches`.
 
-The holding's `meta` MUST carry `splice.lfdecentralizedtrust.org/lock-context` with the same text; `ConditionalLock` MAY be the same contract as the `Holding`, as `LockedAmulet` does, or a separate one referencing it. This keeps the lock invisible to existing wallets, which already render a locked holding as such; a registry with no on-ledger holdings reports the same information through its own view, with `holdingCids` empty.
+The holding's `meta` MUST carry `splice.lfdecentralizedtrust.org/lock-context` with the same text. `ConditionalLock` MAY be the same contract as the `Holding`, as `LockedAmulet` is, or a separate one referencing it. A registry without on-ledger holdings reports the same through its own view, with `holdingCids` empty.
 
 #### 3.5 Guard evaluation
 
-A rule is enactable when some alternative in `anyOf` is satisfied; an alternative is satisfied when every guard in its `allOf` is. Guards are evaluated at enactment against ledger time, the `witness`, and the `actors`:
-
-- `Guard_Preimage`: satisfied if some entry of `witness.preimages`, lowercased, is exactly 32 bytes of hex whose digest under `algorithm` equals `digest`, computed over the decoded bytes rather than the hex text, so the same preimage satisfies an EVM `sha256(bytes32)` or a Bitcoin `OP_SHA256` lock.
-- `Guard_After`: satisfied if ledger time is at or after `time`.
-- `Guard_Before`: satisfied if ledger time is strictly before `time`.
-- `Guard_Parties`: satisfied if at least `threshold` distinct members of `parties` are among `actors`.
+A rule is enactable when every guard in some alternative's `allOf` is satisfied at enactment, against ledger time, the `witness`, and the acting parties: `actors` plus the approvers recorded for exactly the enacted `ruleId` and `legs` (section 3.3). `Guard_After`, `Guard_Before`, and `Guard_Parties` are as stated on their fields. `Guard_Preimage` is satisfied if some entry of `witness.preimages`, lowercased, is 32 bytes of hex whose digest under `algorithm`, over the decoded bytes rather than the hex text, equals `digest`, so the same preimage satisfies an EVM `sha256(bytes32)` or a Bitcoin `OP_SHA256` lock.
 
 Registries MUST support all guard kinds, at least eight alternatives per rule and eight guards per alternative, and MUST advertise the values they support (section 3.8). Guards are a closed set: no arithmetic, no contract references, no repetition, no nesting beyond `anyOf`/`allOf`.
 
-`ConditionalLockView.availableActions` entries for `CLA_Enact` mean the rule may be enacted, not that it is currently satisfied (section 3.3).
-
 #### 3.6 Outcome enactment and continuation
 
-On `Enact` of rule `r` with remaining amount `a`, `Outcome_Unlock` returns `a` to the authorizer unlocked and terminates the lock. `Outcome_Release` releases `fixedLegs` plus the supplied `legs` under the constraints stated on `Outcome_Release` and `ConditionalLock_Enact.legs`; if the total is less than `a`, the lock continues with `a` minus the total and `terms.rules` minus `r`, otherwise it terminates. A leg to `terms.authorizer` is an unlock.
+On `Enact`, `Outcome_Unlock` returns the remaining amount to the authorizer unlocked and terminates the lock. `Outcome_Release` releases `fixedLegs` plus the supplied `legs` as stated on `Outcome_Release` and `ConditionalLock_Enact.legs`; the lock continues with the remainder, without the fired rule, or terminates when nothing remains. A leg to `terms.authorizer` is an unlock.
 
-`Expire` returns the remaining amount to the authorizer unlocked and terminates the lock; its actors are as stated on `ConditionalLock_Expire`. Registries MUST NOT fail an `Expire` for reasons attributable to any party other than the authorizer.
+`Expire` is as stated on `ConditionalLock_Expire`. Registries MUST NOT fail an `Expire` for reasons attributable to any party other than the authorizer.
 
 Creating a receiver holding is a transfer, so the registry's transfer rules (allow lists, pause status, provider controls) apply and registries MAY fail an enactment on them. Conservation is checked against the terms; registries whose holdings carry fees MAY deliver reduced amounts and MUST report the deduction in the result `meta`.
 
-`Cancel` and `Amend` are authorized and validated as stated on their choices. In addition, `Amend` MUST NOT reduce the locked amount (partial release is `Enact`, full release is `Cancel`), and checking against `terms.amount` rather than the holding balance keeps fee decay out of the rule; `newTerms.requestedAt` MUST be in the past and SHOULD be the amendment's timestamp. Every successful choice archives the lock and its backing holdings and creates a continuation when funds remain (section 3.3); the continuation keeps `lockId` and `enactedRuleIds`.
+`Cancel` and `Amend` are authorized and validated as stated on their choices; `Amend` compares `newTerms.amount` with `terms.amount`, not the holding balance, so fee decay stays out of the check, and `newTerms.requestedAt` SHOULD be the amendment's timestamp.
 
-All time comparisons use ledger time. Registries SHOULD accept holdings whose lock has expired as transfer inputs, per the `Holding.lock` doc comment in `splice-api-token-holding-v2`, so `Expire` can be combined with use in one transaction.
+All time comparisons use ledger time and MUST be expressed as bounds on it (`isLedgerTimeLT`, `isLedgerTimeGE`), not by reading it, which caps the delay between preparing and submitting a transaction at one minute (CIP-0062) and would defeat the submission delay of section 3.8. Registries SHOULD accept holdings whose lock has expired as transfer inputs, per the `Holding.lock` doc comment in `splice-api-token-holding-v2`, so `Expire` can be combined with use in one transaction.
 
 #### 3.7 Event reporting
 
-V2 registries MUST report every holdings change these choices cause through `EventLog_HoldingsChange` (CIP-0112 "EventLog for Transaction Parsing"). Creation, approval, amendment, expiry, cancellation, and legs to `terms.authorizer` are holdings changes on `terms.authorizer` with no transfer leg. Each enacted leg to another receiver is a holdings change on `terms.authorizer` and one on the receiver, each carrying a `TransferLegSide` with the identifier `<lockId>/<ruleId>/<legId>` and the leg's `meta`.
+V2 registries MUST report every holdings change these choices cause through `EventLog_HoldingsChange` (CIP-0112 "EventLog for Transaction Parsing"). Creation, approval of an instruction, amendment, expiry, cancellation, and legs to `terms.authorizer` are holdings changes on `terms.authorizer` with no transfer leg. `Approve` is not reported unless the registry recreates the locked holdings, which it then reports the same way. Each enacted leg to another receiver is a holdings change on `terms.authorizer` and one on the receiver, each carrying a `TransferEventsV2.TransferLegSide` with the identifier `<lockId>/<ruleId>/<legId>` and the leg's `meta`.
 
-A leg's two sides MUST share an identifier and distinct legs, including across enactments, MUST have distinct ones, as CIP-0112 requires; `lockId`, `Rule.id`, and `Leg.legId` MUST be non-empty and MUST NOT contain `/`. The registry issues `lockId` at instruction (section 3.2); it MUST be distinct per lock and MUST remain stable across approvals, continuations, and amendments. Because a rule id fires at most once per `lockId` and leg ids are unique within an enactment, the three components suffice.
+A leg's two sides MUST share an identifier, and distinct legs MUST have distinct ones, as CIP-0112 requires, here including legs of different enactments of one lock; `lockId`, `Rule.id`, and `Leg.legId` MUST be non-empty and MUST NOT contain `/`. The registry issues `lockId` at instruction (section 3.2); it MUST be distinct per lock and MUST remain stable across approvals, continuations, and amendments. The three components suffice because a rule id fires at most once per `lockId` and leg ids are unique within an enactment.
 
 `TransferLegSide.meta` MUST contain every key of `Leg.meta`. `Leg.meta` MUST NOT set `splice.lfdecentralizedtrust.org/tx-kind`, `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`, or any other reserved key under `splice.lfdecentralizedtrust.org/conditional-lock/`, and registries MUST reject such terms at creation and amendment. `splice.lfdecentralizedtrust.org/reason` on a leg is not reserved and labels the leg for wallets.
 
-Choice-result and holding `meta` MUST carry `splice.lfdecentralizedtrust.org/tx-kind`: `lock` for creation, approval, and amendment; `transfer` for enactments creating receiver holdings; `unlock` for unlocks, cancellation, and expiry. A holding's `meta` is fixed when the holding is created, so the backing holding of a continuation carries `lock` even when the enactment that created it reports `transfer`. Enactment results MUST carry `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`. `splice.lfdecentralizedtrust.org/reason` SHOULD be set on reject, withdraw, cancel, expire, and amend.
+Choice-result and holding `meta` MUST carry `splice.lfdecentralizedtrust.org/tx-kind`: `lock` for creation, approval of an instruction, `Approve`, and amendment; `transfer` for enactments creating receiver holdings; `unlock` for unlocks, cancellation, and expiry. A holding's `meta` is fixed at creation, so a continuation's backing holding carries `lock` even when its enactment reports `transfer`. Enactment results MUST carry `splice.lfdecentralizedtrust.org/conditional-lock/rule-id`. `splice.lfdecentralizedtrust.org/reason` SHOULD be set on reject, withdraw, cancel, expire, and amend.
 
 #### 3.8 Registry limits and off-ledger API
 
 Registries implementing the package MUST advertise `splice-api-token-conditional-lock-v1` in `supportedApis` of `GET /registry/metadata/v1/instruments/{instrumentId}`, and MUST advertise their limits in the factory `meta`:
 
 - `splice.lfdecentralizedtrust.org/conditional-lock/max-rules` (MUST be at least 8);
-- `splice.lfdecentralizedtrust.org/conditional-lock/max-legs` (the maximum number of legs released by one enactment, i.e. `length fixedLegs + length ConditionalLock_Enact.legs`; MUST be at least 8; the same bound applies to `Outcome_Release.receivers`);
+- `splice.lfdecentralizedtrust.org/conditional-lock/max-legs` (legs released by one enactment, `length fixedLegs + length ConditionalLock_Enact.legs`; MUST be at least 8; also bounds `Outcome_Release.receivers`);
 - `splice.lfdecentralizedtrust.org/conditional-lock/max-alternatives-per-rule` (MUST be at least 8);
 - `splice.lfdecentralizedtrust.org/conditional-lock/max-guards-per-alternative` (MUST be at least 8);
 - `splice.lfdecentralizedtrust.org/conditional-lock/max-preimages` (MUST be at least 8);
-- `splice.lfdecentralizedtrust.org/conditional-lock/max-named-parties` (the maximum number of distinct named parties of the terms, which is the number of parties the registry must carry as lock holders; MUST be at least 8);
+- `splice.lfdecentralizedtrust.org/conditional-lock/max-named-parties` (distinct named parties of the terms, which the registry carries as lock holders; MUST be at least 8);
 - `splice.lfdecentralizedtrust.org/conditional-lock/max-duration` (ISO-8601; MUST be at least 30 days);
 - `splice.lfdecentralizedtrust.org/conditional-lock/min-duration` (ISO-8601; SHOULD reflect the registry's submission delay, see Security Considerations; for Canton Coin at least 24 hours per CIP-0107).
 
-Registries MUST serve:
+Registries MUST serve the following endpoints, each returning the choice context and disclosed contracts for the named choice:
 
-- `POST /registry/conditional-lock/v1/lock-factory`: returns the factory contract id, choice context, and disclosed contracts for `ConditionalLockFactory_Lock`, shaped like the CIP-0056 transfer-factory endpoint;
-- `POST /registry/conditional-lock/v1/{lockInstructionId}/choice-contexts/{accept|reject|withdraw}`: returns the choice context and disclosed contracts for the named choice on a `ConditionalLockInstruction`;
-- `POST /registry/conditional-lock/v1/{lockContractId}/choice-contexts/{enact|expire|cancel|amend}`: returns the choice context and disclosed contracts for the named choice on a `ConditionalLock`, addressed by its contract id rather than by `ConditionalLockView.lockId`.
-
-The OpenAPI file `conditional-lock-v1.yaml` is part of the reference implementation.
+- `POST /registry/conditional-lock/v1/lock-factory`: `ConditionalLockFactory_Lock`, with the factory contract id, shaped like the CIP-0056 transfer-factory endpoint;
+- `POST /registry/conditional-lock/v1/{lockInstructionId}/choice-contexts/{accept|reject|withdraw}`: the choice on a `ConditionalLockInstruction`;
+- `POST /registry/conditional-lock/v1/{lockContractId}/choice-contexts/{enact|approve|expire|cancel|amend}`: the choice on a `ConditionalLock`, addressed by its contract id rather than by `ConditionalLockView.lockId`.
 
 #### 3.9 View budget
 
-Canton's transaction cost is driven by the number of views a transaction generates, created whenever a called choice has informees the calling choice does not (CIP-0112 "Guidelines & Interfaces for Performance Optimization"). Registries MUST implement the eight `*ExtraObservers` functions of section 3, each setting its choice's observers, and SHOULD do so such that each choice generates a single view.
+Transaction cost grows with the number of views, one per called choice whose informees the caller lacks (CIP-0112 "Guidelines & Interfaces for Performance Optimization"). Registries MUST implement the nine `*ExtraObservers` functions of section 3, each setting its choice's observers, and SHOULD do so such that each choice generates a single view. An `ExtraObservers` function is evaluated before the choice body; it MUST be total and MUST NOT fail.
 
-Usually this means:
+The `ConditionalLock` and `ConditionalLockInstruction_Accept` functions are as stated on their doc comments, including the empty list for a `ruleId` not in `terms.rules` on `Enact` and `Approve`. `ConditionalLockFactory_Lock` usually returns the parties of `terms.authorizer` and of every account whose approval the registry expects in the same transaction; `ConditionalLockInstruction_Reject` and `_Withdraw` those of `terms.authorizer` and of the accounts still in `pendingApprovals`.
 
-- `ConditionalLockFactory_Lock`: `terms.authorizer`'s parties and those of every account whose approval the registry expects in the same transaction.
-- `ConditionalLockInstruction_Accept`, `_Reject`, `_Withdraw`: `terms.authorizer`'s parties and those of the accounts still in `pendingApprovals`.
-- `ConditionalLock_Enact`: the parties of the accounts the outcome pays: none for `Outcome_Unlock`, the `fixedLegs` and enactor-supplied `legs` receiver parties for `Outcome_Release`.
-- `ConditionalLock_Expire`: none; funds return to the authorizer, already a signatory, as for `Outcome_Unlock`.
-- `ConditionalLock_Cancel` and `ConditionalLock_Amend`: the named parties whose consent the choice already requires, plus for `Amend` those `newTerms` introduces.
-
-An `ExtraObservers` function is evaluated before the choice body; it MUST be total and MUST NOT fail. In particular, `ConditionalLock_Enact` with a `ruleId` not in `terms.rules` MUST yield the empty list and leave the rejection to the choice body.
-
-Registries whose instruments do not require confidentiality between a lock's stakeholders MAY set all named parties as choice observers on every choice, per CIP-0112's recommendation for such assets; registries that do require confidentiality MUST NOT. In particular, a `Guard_Preimage` enactment reveals the preimage to every informee, so `conditionalLock_enactExtraObservers` MUST NOT name parties beyond the accounts the outcome pays unless the instrument is public.
-
-The intended budget is one view per exercised choice; the escrowed DvP of section 4 exercises two `ConditionalLock_Enact` choices in one transaction and SHOULD therefore cost at most three views.
-
-These functions bound visibility, not authorization: a choice observer is not an actor, and naming a party here never entitles it to enact a rule.
+Registries whose instruments do not require confidentiality between a lock's stakeholders MAY set all named parties as choice observers on every choice, per CIP-0112's recommendation for such assets; registries that do require confidentiality MUST NOT, and `conditionalLock_enactExtraObservers` bounds who learns a revealed preimage as stated on it. The intended budget is one view per exercised choice; the escrowed DvP of section 4 exercises two `ConditionalLock_Enact` choices in one transaction and SHOULD therefore cost at most three views. These functions bound visibility, not authorization: naming a party never entitles it to enact a rule.
 
 ### 4. Worked terms
 
-Written in shorthand: accounts are shown as their owning party, and `Leg` is shown without its `meta`, which is empty in every example.
+Written in shorthand: accounts are shown as their owning party, a rule's single alternative as its `allOf`, and `Leg` without its `meta`, empty throughout.
 
-- **HTLC leg.** One rule: enactors `[bob]`, one alternative `allOf [Guard_Preimage Sha256 H]`, outcome `Outcome_Release with fixedLegs = [Leg "claim" bob amount]; receivers = []`.
-- **Escrowed DvP with a dispute window.** Alice locks X for Bob with `deadline < expiresAt` and two rules. Rule `settle`: enactors `[alice, bob]`, one alternative `allOf [Guard_Parties [alice, bob] 2, Guard_Before deadline]`, outcome `Outcome_Release with fixedLegs = [Leg "delivery" bob amount]; receivers = []`, terminating the lock. Rule `award`: enactors `[arbiter]`, one alternative `allOf [Guard_After deadline, Guard_Parties [arbiter] 1]`, outcome `Outcome_Release with fixedLegs = []; receivers = [alice, bob]`. Bob's lock of Y on registry B is symmetric, and the two `settle` enactments are exercised in one Canton transaction. The rules are mutually exclusive in time: `settle` only before the deadline, `award` only from the deadline to expiry, and only `Expire` after expiry, returning the remainder to Alice. A partial award consumes the `award` rule, so the arbiter decides once. One pool of funds, two conditions, two outcomes.
-- **Arbiter escrow.** One rule: enactors `[arbiter]`, one alternative `allOf [Guard_Parties [arbiter] 1]`, outcome `Outcome_Release with fixedLegs = []; receivers = [buyer, seller]`. The arbiter can award all to one side or split.
-- **Vesting.** Four rules, each with enactors `[grantee]`, one alternative `allOf [Guard_After T_k]`, and outcome `Outcome_Release with fixedLegs = [Leg "tranche-k" grantee (amount/4)]; receivers = []`. Each fires once; the lock continues with the remainder, and only the grantee submits the enactment once the date has passed.
-- **Collateral.** Rule `repaid`: enactors `[pledgee]`, one alternative `allOf [Guard_Parties [pledgee] 1]`, outcome `Outcome_Unlock`. Rule `default`, enactable between maturity and expiry (`maturity < expiresAt`): enactors `[pledgee]`, one alternative `allOf [Guard_After maturity, Guard_Parties [pledgee] 1]`, outcome `Outcome_Release with fixedLegs = [Leg "default" pledgee amount]; receivers = []`. Margin top-up and maturity extension go through `Amend`, reusing the `default` rule's id, legal since it has not fired and so is not in `enactedRuleIds`.
-- **Conditional payment.** One rule, with `deadline <= expiresAt`: enactors `[payee]`, one alternative `allOf [Guard_Parties [attestor] 1, Guard_Before deadline]`, outcome `Outcome_Release with fixedLegs = [Leg "payment" payee amount]; receivers = []`.
+- **HTLC leg.** One rule: enactors `[bob]`, `allOf [Guard_Preimage Sha256 H]`, outcome `Outcome_Release with fixedLegs = [Leg "claim" bob amount]; receivers = []`.
+- **Escrowed DvP with a dispute window.** Alice locks X for Bob, with `deadline < expiresAt`. Rule `settle`: enactors `[alice, bob]`, `allOf [Guard_Parties [alice, bob] 2, Guard_Before deadline]`, outcome `Outcome_Release with fixedLegs = [Leg "delivery" bob amount]; receivers = []`. Rule `award`: enactors `[arbiter]`, `allOf [Guard_After deadline, Guard_Parties [arbiter] 1]`, outcome `Outcome_Release with fixedLegs = []; receivers = [alice, bob]`. Bob's lock of Y on registry B is symmetric; both `settle` rules are enacted jointly in one Canton transaction. `settle` applies before the deadline, `award` at most once from the deadline to expiry, and after expiry `Expire` returns the remainder to Alice. In the venue form, the venue is `settle`'s only enactor, its guards unchanged, and Alice and Bob each approve `settle` on both locks from their own wallets. This trades counterparty risk for trust in the venue, a named party of both locks, needed for `Cancel` and `Amend`, and able to enact one lock without the other.
+- **Arbiter escrow.** One rule: enactors `[arbiter]`, `allOf [Guard_Parties [arbiter] 1]`, outcome `Outcome_Release with fixedLegs = []; receivers = [buyer, seller]`. The arbiter can award all to one side or split.
+- **Vesting.** Four rules, each with enactors `[grantee]`, `allOf [Guard_After T_k]`, and outcome `Outcome_Release with fixedLegs = [Leg "tranche-k" grantee (amount/4)]; receivers = []`. The lock continues with the remainder after each.
+- **Collateral.** Rule `repaid`: enactors `[pledgee]`, `allOf [Guard_Parties [pledgee] 1]`, outcome `Outcome_Unlock`. Rule `default`, enactable between maturity and expiry (`maturity < expiresAt`): enactors `[pledgee]`, `allOf [Guard_After maturity, Guard_Parties [pledgee] 1]`, outcome `Outcome_Release with fixedLegs = [Leg "default" pledgee amount]; receivers = []`. Margin top-up and maturity extension go through `Amend`, which may reuse the unfired `default` id.
+- **Conditional payment.** One rule, with `deadline <= expiresAt`: enactors `[payee]`, `allOf [Guard_Parties [attestor] 1, Guard_Before deadline]`, outcome `Outcome_Release with fixedLegs = [Leg "payment" payee amount]; receivers = []`. The attestor approves the rule from their own wallet with `ConditionalLock_Approve`, and the payee enacts later, alone.
 
 ## Rationale
 
-**A release policy rather than an HTLC.** Escrow, vesting, collateral, and conditional payment are an HTLC with different guards and more than one outcome. One data model covers all of them.
+**A release policy rather than an HTLC.** Escrow, vesting, collateral, and conditional payment are an HTLC with different guards and more than one outcome, so one data model covers them all.
 
-**A closed guard set with a fixed two-level shape.** A rule is a disjunction (`anyOf`) of conjunctions (`allOf`) of leaf guards: no arithmetic, no state, no contract references, no recursion. A wallet renders a two-level list, and registries advertise limits as CIP-0112 bounds transfer legs.
+**A closed guard set with a fixed two-level shape.** A rule is a disjunction (`anyOf`) of conjunctions (`allOf`) of leaf guards, so wallets render a two-level list; registries advertise limits above mandatory floors, as CIP-0112 sets a floor of 25 transfer legs per allocation.
 
 **Partial consumption instead of nested terms.** A rule fires once and the lock continues with the remainder, so vesting is a flat rule list rather than a tree of successor terms.
 
-**Conditions as well as executors.** CIP-0112 already lets counterparties act as their own executors, which settles delivery versus payment. It cannot express a release that depends on a fact rather than a party: a preimage, or a point in ledger time. Where a party does decide, `Guard_Parties` names it and the outcome bounds its discretion to a receiver set fixed in the terms.
-
 **Atomicity instead of cross-lock guards.** Two locks enacted in one transaction commit or fail together, so a guard on another lock's state adds nothing.
 
-**Expiry always unlocks.** A directed outcome on expiry is an ordinary `Guard_After` rule naming the beneficiary, with `expiresAt` as the safety valve behind it. In CIP-0112, expiry, withdrawal, and cancellation likewise only return funds to the authorizer.
+**Expiry always unlocks.** A directed outcome on expiry is an ordinary `Guard_After` rule naming the beneficiary, with `expiresAt` as the safety valve behind it; in CIP-0112, expiry, withdrawal, and cancellation only return funds to the authorizer.
 
-**One release outcome.** `Outcome_Release` carries fixed legs and a bounded discretionary part under one conservation check, so a fixed fee plus a discretionary award is one rule. The enactor may still release the fixed legs alone (Security Considerations, "Enactor discretion"). CIP-0112 allocations use the same shape: legs fixed at authorization, legs supplied at execution, one budget.
+**One release outcome.** `Outcome_Release` carries fixed legs and a bounded discretionary part under one conservation check, as CIP-0112 allocations do, so a fixed fee plus a discretionary award is one rule; the enactor may release the fixed legs alone (Security Considerations, "Enactor discretion").
 
 **A new package rather than a change to `splice-api-token-holding-v2`.** Adding choices to `Holding` would break every implementation. A separate package follows the CIP-0112 evolution model: registries opt in, wallets discover support through `supportedApis`, and the on-ledger footprint is the existing `Lock` view.
 
-**What a registry must implement.** Three interfaces and the holding representation of section 3.4, which is the `Lock` view CIP-0056 already defines. Any registry that implements CIP-0112 can implement this package at the same Daml-LF target. Every guard kind and outcome is mandatory; only the numeric limits of section 3.8 are registry-specific. Guard evaluation, terms validation, and outcome resolution are pure functions of the terms, the witness, the actors, and ledger time, with no registry-specific input, so every registry would write them identically. The reference implementation provides them as one module that imports only this package and the two API packages it depends on; a registry implements the eight choice bodies and reuses the evaluator rather than the guard language.
+**Why not an allocation with metadata.** The draft locking CIP (cips#250) carries governance locks as V2 allocations with namespaced metadata and judges that cheaper than a dedicated interface; that holds for a lock released by a party decision on one registry. Fact-checked releases, several outcomes over one pool, and a receiver bound on discretion would, as metadata, become a guard language each registry enforces its own way: the cross-registry HTLC gap this CIP closes.
 
-**Approvals.** Creating a receiver holding requires the receiver's authority, as for transfers, and a registry MAY also require the account's provider. The instruction names the accounts whose approval is outstanding and reports who may act through `availableActions`.
+**What a registry must implement.** Three interfaces and the section 3.4 holding representation, the `Lock` view of CIP-0056, built at CIP-0112's Daml-LF target. Every guard kind and outcome is mandatory; only the section 3.8 limits vary. Guard evaluation, terms validation, and outcome resolution are pure functions of the terms, witness, acting parties, and ledger time; the reference implementation provides them as one module a registry reuses around its nine choice bodies.
 
-**Byte-domain hashing.** `DA.Text.sha256` hashes UTF-8 text; `DA.Crypto.Text.sha256` and `keccak256` hash the decoded bytes of a hex string, which is what external-chain hashlocks compute. The preimage is therefore 32 bytes of hex, lowercased, and both algorithms are mandatory: SHA-256 for Bitcoin, Lightning, and EVM HTLCs, Keccak-256 for EVM-native counterparties.
+**Approvals.** Creating a receiver holding requires the receiver's authority, as for transfers, and a registry MAY also require the account's provider. `ConditionalLock_Approve` records approvals on the lock, so a `Guard_Parties` quorum is reached one party at a time from their own wallets, as in cips#250, without a registry delegation contract; an approval binds the exact legs, so it cannot be reused for another split.
 
-**Canton Coin.** `LockedAmulet` carries only `holders`, `expiresAt`, and a context, so a Canton Coin implementation is a sibling template beside it that carries the terms, with the `ConditionalLockFactory` instance on `ExternalPartyAmuletRules` so that externally signed parties can lock, enact, and expire within the CIP-0107 submission delay. Lock holders are capped by `AmuletConfig.maxNumLockHolders`, which is the bound `max-named-parties` advertises; the holding fee accrued over the life of the lock is netted at enactment and reported in the result `meta` (section 3.6); and the DSO expires abandoned locks as `LockedAmulet_ExpireAmuletV2` does today (Security Considerations, "Expired locks"). None of this touches DSO governance. CIP-0105 and CIP-0116 lock Canton Coin per PartyId for Super Validator weight and Featured App eligibility; this CIP has no governance semantics and leaves them unaffected.
+**Byte-domain hashing.** External-chain hashlocks hash bytes, so guards use `DA.Crypto.Text.sha256` and `keccak256` on decoded hex, not `DA.Text.sha256` on UTF-8 text. Both algorithms are mandatory: SHA-256 for Bitcoin, Lightning, and EVM HTLCs, Keccak-256 for EVM-native counterparties.
+
+**Canton Coin.** `LockedAmulet` carries only `holders`, `expiresAt`, and a context, so a Canton Coin implementation is a sibling template carrying the terms, with the factory on `ExternalPartyAmuletRules` so externally signed parties can act within the CIP-0107 submission delay. `TransferConfig.maxNumLockHolders` is the bound `max-named-parties` advertises. CIP-0078 charges no holding fee on transfer inputs, so enactment conserves the locked amount. Abandoned locks need an admin `Expire` returning funds to the authorizer (Security Considerations, "Expired locks"); `LockedAmulet_ExpireAmuletV2` burns expired dust instead. cips#250 puts the CIP-0105 (aggregate per Super Validator) and CIP-0116 (per PartyId) governance locks on V2 allocations, without expiry, vesting continuously, with owner substitution; this CIP does not replace them, and both reach wallets through `Holding.lock`.
 
 **Alternatives considered.**
 
-- Application-owned escrow templates: funds leave the authorizer's portfolio and change tax and custody treatment; CIP-0105 requires locking to work from self-custody and custodial wallets alike.
-- Committed allocations with the counterparty as executor: right for a trade with known or settlement-chosen legs; no fact-checked release, no second outcome, no receiver bound on discretion.
-- `TransferPreapproval` plus off-ledger coordination: no on-ledger enforcement of the condition or the expiry.
-- Registry-specific lock contracts such as `LockedAmulet`: correct for one registry, unusable across registries, not condition-aware.
+- Application-owned escrow templates: funds leave the authorizer's portfolio, changing tax and custody treatment.
+- `TransferPreapproval` with off-ledger coordination: no on-ledger enforcement of condition or expiry.
+- Registry-specific locks such as `LockedAmulet`: one registry only, not condition-aware.
 - Cross-lock and oracle-data guards: unnecessary given atomic enactment and `Guard_Parties`; deferred.
 
 ## Backwards Compatibility
 
-The CIP is additive. No existing package, interface, choice, or off-ledger endpoint changes. Registries that do not implement the package are unaffected; wallets that do not implement it still display conditionally locked holdings as locked holdings and fall back to the generic rendering CIP-0056 prescribes for choices outside the standard (`lock` is a new `tx-kind` value). Applications that need the primitive can test for it per instrument through `supportedApis`.
+The CIP is additive: no existing package, interface, choice, or endpoint changes, and registries that do not implement it are unaffected. Wallets that do not implement it display conditionally locked holdings as locked and fall back to CIP-0056's generic rendering for choices outside the standard (`lock` is a new value of Splice's `tx-kind` metadata key). Applications test for the package per instrument through `supportedApis`.
 
 ## Reference Implementation
 
-An Apache-2.0 reference implementation of this revision is at https://github.com/tankcdr/conditional-holding-lock: the `splice-api-token-conditional-lock-v1` package as specified here, an implementation of it over the published `TestTokenV2` package, the registry OpenAPI file `conditional-lock-v1.yaml`, and Daml Script proofs of the interface's properties, including byte-domain hash vectors shared with EVM and Solana reference programs. It can be taken as a dependency by any registry or application. Adding the package to the Splice `token-standard` directory, extending `TestTokenV2` in the Splice tree, wallet support, and a Canton Coin implementation follow when the maintainers schedule them and are required before this CIP can move to Final.
+An Apache-2.0 reference implementation is at https://github.com/tankcdr/conditional-holding-lock: this package, an implementation over the published `TestTokenV2` package, the OpenAPI file `conditional-lock-v1.yaml`, and Daml Script property proofs, including byte-domain hash vectors shared with EVM and Solana reference programs. Adding the package to Splice's `token-standard` directory, extending `TestTokenV2` there, wallet support, and a Canton Coin implementation await the maintainers' schedule and are required before this CIP can move to Final.
 
 ## Security Considerations
 
 - **Timelock ordering.** In a two-chain swap the leg released first by the preimage must have the shorter expiry, leaving the party who learns it on-ledger time to claim on the other chain.
-- **Blocked receivers.** Enactment is a transfer, so a paused or blocked receiver account fails the rule and the funds return to the authorizer at expiry; in a two-chain swap the external leg stays claimable. Counterparties SHOULD confirm receiver status before funding the external leg, and registries SHOULD surface it through the choice-context endpoint (section 3.8).
+- **Blocked receivers.** Enactment is a transfer: a paused or blocked receiver fails the rule and the funds return to the authorizer at expiry, while the other chain's leg stays claimable. Counterparties SHOULD confirm receiver status before funding the external leg, and registries SHOULD surface it through the choice-context endpoint (section 3.8).
 - **Submission delay.** A registry's delay between preparation and execution (up to 24 hours on Canton Coin under CIP-0107) shrinks the enactment window. Wallets MUST allow for it when choosing `expiresAt` and `Guard_Before`, and registries SHOULD publish `min-duration` accordingly.
 - **Authoring errors.** A rule whose `fixedLegs` exceed the remaining amount cannot fire. Wallets SHOULD check that every firing sequence stays enactable, and registries MAY reject terms whose legs exceed `amount`.
 - **Enactor discretion.** With non-empty `receivers` the enactor chooses amounts within the receiver set and the remainder net of `fixedLegs`; authorizers SHOULD gate it with `Guard_Parties`. Supplied legs MAY be empty, so the enactor can take `fixedLegs` alone and leave the rest to expire; authorizers SHOULD size fixed fees with that in mind.
-- **Preimage evaluation.** The lock's signatories hash and compare the witness (section 3.3); the enactor supplies it and cannot make a guard appear satisfied.
-- **Amendment.** `Amend` is unanimous and never returns `Pending`. A fired rule cannot be reinstated, because `enactedRuleIds` persists for the lifetime of the `lockId`.
+- **Recorded approvals.** Once recorded approvals for a rule and legs meet its `Guard_Parties` and include an enactor, any party able to exercise `ConditionalLock_Enact` can trigger exactly that enactment, the other guards still checked. An approval cannot depend on another lock and is irrevocable until `Amend` clears it, so a party SHOULD NOT approve its outgoing leg of a multi-lock settlement while a counterparty who is an enactor can complete the quorum; section 4 gives the venue form. Each `Approve` replaces the lock and can contend with an in-flight enactment; one list of legs per approver per rule, each `Approve` recording someone new, bounds this. Approved legs a continuation leaves unfunded, or that approvers list in different orders, stay approved until an `Amend`; wallets SHOULD supply legs in a canonical order.
 - **Expired locks.** An expired lock can only be expired or cancelled, and registries MUST NOT fire any rule after expiry. Registries MAY let the admin alone `Expire` a lock or `Withdraw` an abandoned instruction at or after `expiresAt`, since funds only return to the authorizer, and registries whose holdings accrue fees MUST provide that cleanup path.
-- **Preimage disclosure.** A revealed preimage is visible to the enactment's stakeholders; section 3.9 bounds the choice observers. A digest reused across locks is a wallet error, and wallets SHOULD warn.
+- **Preimages.** The lock's signatories hash and compare the witness (section 3.3), so the enactor cannot make a guard appear satisfied. A revealed preimage is visible to the enactment's stakeholders and the choice observers of section 3.9. A digest reused across locks is a wallet error, and wallets SHOULD warn.
 - **Privacy.** Digests, receivers, named parties, and `Lock.context` are visible to the lock's stakeholders and, through `context`, to account providers. Wallets SHOULD keep `context` generic.
 - **Authorization.** The authorizer's authority is granted at creation and never required at enactment. Implementations MUST check every choice's `actors` (section 3) and MUST ensure no other path moves locked funds.
 
@@ -750,6 +776,12 @@ An Apache-2.0 reference implementation of this revision is at https://github.com
 2026-09-18 - Review round two, resolving the review comments on the previous revision of `ConditionalLockV1.daml` in canton-network/splice#7294, cited by their line in that revision: flattened `Guard` into a leaf type with `Alternative.allOf` and `Rule.anyOf` (line 47), renamed `owner` to `authorizer` (line 91), removed the fallback outcome so `Expire` returns the remainder to the authorizer (line 102), merged the release outcomes into `Outcome_Release` with `fixedLegs` and enactor-supplied legs bounded by `receivers` (line 250), added `Leg.legId` and `Leg.meta` (line 61), generalized acceptance to an approver `Account` with `pendingApprovals` and `availableActions` (line 194), reworded guard evaluation as a check by the lock's signatories (line 23), fixed `Amend` semantics, specified the eight `*ExtraObservers` functions, added `lockId`, `enactedRuleIds`, and `holdingCids`, and added `authorizerHoldingCids` to `ConditionalLockResult_Failed`.
 
 2026-09-22 - Rationale: guard evaluation is a registry-neutral pure function a registry reuses rather than implements; what a Canton Coin implementation adds.
+
+2026-09-23 - Accuracy: CIP-0112 section and field citations, the Canton Coin paragraph against CIP-0078 and the `LockedAmulet` choices, CIP-0105's aggregate basis, and the V1 wallet caveat. Time comparisons MUST be bounds on ledger time (section 3.6). Relation to the draft locking CIP, cips#250, in Motivation and Rationale.
+
+2026-09-23 - Round three: recorded approvals (`ConditionalLock_Approve`, `ConditionalLockView.approvals`) so `Guard_Parties` quorums can be reached one party at a time.
+
+2026-09-24 - Tightened, no normative change.
 
 ## Copyright
 

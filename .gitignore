@@ -18,6 +18,7 @@ contracts/evm/lib/
 /examples/devnet-escrow/dars/
 
 # Localnet
+/docs/runbook/localnet-reference-evidence.json
 .env
 .env.*
 !.env.example

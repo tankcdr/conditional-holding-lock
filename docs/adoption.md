@@ -52,7 +52,7 @@ Two warnings that matter more than the table:
   quickstart in section 6 runnable end to end. It is not a production dependency, and a production
   registry replaces it with an adapter over its own token package.
 - **`conditional-lock-test` must never appear in a consumer's `data-dependencies`.** It is the
-  70-script proof suite, it depends on `daml-script`, and it compiles with
+  94-script proof suite, it depends on `daml-script`, and it compiles with
   `-Wno-template-interface-depends-on-daml-script`. It is deliberately not attached to the release,
   and it is recorded in the release manifest with `"attached": false` so its absence is a decision
   rather than an oversight.
@@ -78,8 +78,9 @@ compatibility, using package IDs. Section 7 gives the worked example. This is th
 the [release notes](release-notes/v0.1.0.md) make, in the same words, and it is the single fact
 that determines whether your integration survives a rebuild.
 
-Note the DAR **filenames** carry `1.0.0`, not the release version. That is deliberate, and the
-reasons are in [CHANGELOG.md](../CHANGELOG.md) under "Versioning rule"; they are not restated here.
+The DAR **filenames** carry the release version from `v0.2.0` on; `v0.1.0` predates that rule and
+ships `*-1.0.0.dar`, which the commands below use. The reasons are in [CHANGELOG.md](../CHANGELOG.md)
+under "Versioning rule".
 
 ---
 
@@ -197,8 +198,10 @@ test issuer into your build. The entry points a registry inherits:
 
 | Function | Signature (from `packages/conditional-lock-utils/daml/ConditionalLock/Policy.daml`) | Use |
 | --- | --- | --- |
-| `validateTerms` | `Limits -> Party -> Time -> LockTerms -> Update ()` | the CIP section 3.1 terms validation, in one call |
-| `satisfied` | `Time -> [Party] -> Witness -> [Alternative] -> Bool` | guard evaluation, CIP section 3.5 |
+| `validateTerms` | `Limits -> Party -> LockTerms -> Update ()` (0.1.0: `Limits -> Party -> Time -> LockTerms -> Update ()`) | the CIP section 3.1 terms validation, in one call |
+| `satisfied` | `[Party] -> Witness -> [Alternative] -> Update Bool` (0.1.0: `Time -> [Party] -> Witness -> [Alternative] -> Bool`) | guard evaluation, CIP section 3.5; from 0.2.0 given `actingParties` |
+| `approve` | `Limits -> LockTerms -> [Approval] -> Text -> [Leg] -> [Party] -> Update [Approval]` | `ConditionalLock_Approve`, CIP section 3.3 (from 0.2.0) |
+| `actingParties` | `Text -> [Leg] -> [Party] -> [Approval] -> [Party]` | actors plus recorded approvers for `ConditionalLock_Enact` (from 0.2.0) |
 | `resolveOutcome` | `Limits -> LockTerms -> Outcome -> [Leg] -> Update [Leg]` | outcome enactment, CIP section 3.6 |
 | `requireActors` | `Text -> [Party] -> [Party] -> Update ()` | the actor check every choice of CIP section 3 requires |
 | `lockHolders` | `LockTerms -> [Party]` | the lock holders CIP section 3.4 requires on the backing holding |
@@ -257,6 +260,11 @@ artifact in this repository certifies conformance. Each item cites the CIP secti
       (CIP section 3.4). `lockHolders` computes the holders.
 - [ ] **Retain enacted rule ids for the lifetime of the `lockId`**, so a fired rule cannot be
       reinstated (CIP sections 3.3 and 3.5).
+- [ ] **Record rule approvals and count them at enactment** (from 0.2.0): `ConditionalLock_Approve` records the
+      approving parties per `(ruleId, legs)`, and `ConditionalLock_Enact` counts `actors` together
+      with the approvers recorded for its exact `(ruleId, legs)`. Keep approvals of unfired rules
+      across continuations, drop a fired rule's, and clear them all on `Amend` (CIP section 3.3).
+      `approve`, `actingParties`, `dropApprovals`, and `clearApprovals` do this.
 - [ ] **Fail enactment at or after `terms.expiresAt`**, and never fire a rule after expiry
       (CIP section 3.3, and Security Considerations, "Expired locks").
 - [ ] **Report every holdings change through the V2 transfer events** (CIP section 3.7).
@@ -264,7 +272,7 @@ artifact in this repository certifies conformance. Each item cites the CIP secti
       limit keys in the factory `meta` (CIP section 3.8).
 - [ ] **Serve the lock-factory and choice-context endpoints** of CIP section 3.8; see section 5 below
       for the OpenAPI file.
-- [ ] **Implement the eight `*ExtraObservers` functions**, each total and non-failing, budgeting one
+- [ ] **Implement the nine `*ExtraObservers` functions**, each total and non-failing, budgeting one
       view per exercised choice (CIP section 3.9, following CIP-0112 "Guidelines & Interfaces for
       Performance Optimization"). In particular, `conditionalLock_enactExtraObservers` MUST NOT name
       parties beyond the accounts the outcome pays unless the instrument is public, because a
@@ -296,9 +304,11 @@ An optional fourth line adds client-side validation:
 - dars/conditional-lock-utils-1.0.0.dar
 ```
 
-`satisfied : Time -> [Party] -> Witness -> [Alternative] -> Bool` answers "would this enactment
-succeed" against a rule's `anyOf` alternatives before you submit, which turns a failed submission
-into a message in your UI. `limitsFromMetadata` reads a factory's advertised limits back into a
+`satisfied` answers "would this enactment succeed" against a rule's `anyOf` alternatives before
+you submit, which turns a failed submission into a message in your UI. In 0.1.0 it is a pure
+function of ledger time; from 0.2.0 it is an `Update` over ledger-time bounds, evaluated in a
+dry-run submission and given `actingParties` (the actors plus the approvals recorded in the
+lock's view). `limitsFromMetadata` reads a factory's advertised limits back into a
 `Limits` record so you can check terms against the registry's bounds before offering them.
 
 For a complete lifecycle to read — lock, approve, enact, assert — see
@@ -332,16 +342,16 @@ If you are aligning with Splice's own bindings, copy that block and use `dpm cod
 codegen example in either language ages badly and is not what blocks adoption; the invocation is.
 
 **2. The OpenAPI file.** CIP section 3.8 requires registries to serve a lock-factory endpoint and
-seven choice-context endpoints, and calls `conditional-lock-v1.yaml` part of the reference
+eight choice-context endpoints, and calls `conditional-lock-v1.yaml` part of the reference
 implementation. It is in this repository, versioned alongside the interface package it describes:
 
 [`packages/splice-api-token-conditional-lock-v1/openapi/conditional-lock-v1.yaml`](../packages/splice-api-token-conditional-lock-v1/openapi/conditional-lock-v1.yaml)
 
-Eight paths: `/registry/conditional-lock/v1/lock-factory`, then
+Nine paths from 0.2.0, eight before (no `approve`): `/registry/conditional-lock/v1/lock-factory`, then
 `/registry/conditional-lock/v1/{lockInstructionId}/choice-contexts/{accept,reject,withdraw}` for the
 three instruction choices and
-`/registry/conditional-lock/v1/{lockContractId}/choice-contexts/{enact,expire,cancel,amend}` for the
-four lock choices. Without them a wallet cannot fetch the disclosed contracts a choice needs. The
+`/registry/conditional-lock/v1/{lockContractId}/choice-contexts/{enact,approve,expire,cancel,amend}` for the
+five lock choices. Without them a wallet cannot fetch the disclosed contracts a choice needs. The
 lock choices are addressed by contract id rather than by `ConditionalLockView.lockId`.
 
 **3. The metadata conventions**, so a lock renders as something other than "unknown". The reference
@@ -385,7 +395,7 @@ and names any that are missing before it starts a sandbox.
 # Against the DARs you downloaded in section 2:
 ./scripts/quickstart-check.sh dars/
 
-# Against this repository's own build outputs, which works before any tag exists:
+# Against this repository's own build outputs, which does not need the release assets:
 ./scripts/quickstart-check.sh
 # or
 just quickstart
@@ -417,8 +427,8 @@ What the script does, and what you would do by hand on your own participant:
 participant and one synchronizer with controlled time. `Guard_After` and `Guard_Before` behave very
 differently under wall-clock time on a real participant with a submission delay — which is the whole
 reason section 3.3 exists. Treat the quickstart as proof that your dependency set is right, not as
-proof that your timing is. The next step after it passes is a real network, which is what the
-adoption evidence log below will cover — that document does not exist yet.
+proof that your timing is. The next step after it passes is a real network, which
+[adoption-evidence.md](adoption-evidence.md) records.
 
 ---
 

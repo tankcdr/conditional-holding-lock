@@ -274,7 +274,7 @@ test_enactObserversAreTotalAndNameOnlyThePaidAccounts = do
   CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [outsideLeg] extra) === []
   CL.conditionalLock_enactExtraObservers iface (CL.ConditionalLock_Enact "award" [e.arbiter] noWitness [bobLeg, outsideLeg] extra) === [e.bob]
 
-  -- CIP section 3.9 covers all eight `*ExtraObservers` functions. This registry
+  -- CIP section 3.9 covers all nine `*ExtraObservers` functions. This registry
   -- serves a public test instrument, so the lock choice names every named party
   -- of the terms and keeps the creation to a single view.
   let factoryIface = toInterface @CL.ConditionalLockFactory (Impl.Factory e.adminA e.rulesA "observer-budget")
@@ -323,3 +323,42 @@ test_enactObserversAreTotalForAnAlreadyFiredRule = do
       -- whose continuation keeps a rule the arbiter enacts.
       submitMustFail e.arbiter $ exerciseCmd next $ enactArg "first" [e.arbiter]
     _ -> abort "expected a continuation after a partial release"
+
+-- CIP section 3.9: `conditionalLock_approveExtraObservers` is total, the same
+-- shape as `conditionalLock_enactExtraObservers` above: [] for a ruleId not
+-- in `terms.rules`, whether unknown outright or already fired on a
+-- continuation, and every named party of the terms for a known rule.
+test_approveObserversAreTotalAndNameEveryNamedParty : Script ()
+test_approveObserversAreTotalAndNameEveryNamedParty = do
+  e <- setup ()
+  -- A second, unfired rule keeps `namedParties` of the continuation
+  -- non-empty, so the already-fired case below cannot pass by coincidence.
+  let terms = (termsFor e) with
+        rules =
+          [ CL.Rule "first" [e.bob] (alt (CL.Guard_Parties [e.bob] 1))
+              (CL.Outcome_Release [CL.Leg "payout" (account e.bob) 30.0 emptyMetadata] [])
+          , CL.Rule "second" [e.charlie] (alt (CL.Guard_Parties [e.charlie] 1)) CL.Outcome_Unlock ]
+  (cid, _) <- lock e.rulesA terms [e.alice, e.bob] >>= asLocked
+  [(_, activeLock)] <- query @Impl.ActiveLock e.alice
+  let state = activeLock.state
+  let iface = toInterface @CL.ConditionalLock (Impl.ActiveLock state)
+
+  -- Unknown rule id: total, yields no observers.
+  CL.conditionalLock_approveExtraObservers iface (approveArg "no-such-rule" [] []) === []
+
+  -- Known rule: every named party of the terms, and that set is non-empty so
+  -- the [] cases above are not vacuous.
+  CL.conditionalLock_approveExtraObservers iface (approveArg "first" [] [e.bob]) === namedParties state.terms
+  assert (not (null (namedParties state.terms)))
+
+  result <- submit e.bob $ exerciseCmd cid $ enactArg "first" [e.bob]
+  case result.output of
+    CL.ConditionalLockResult_Enacted _ _ (Some next) -> do
+      Some nextActive <- queryContractId e.alice (coerceContractId next : ContractId Impl.ActiveLock)
+      let nextState = nextActive.state
+      assert (not (null (namedParties nextState.terms)))
+      -- "first" has fired: same total case as an unknown rule id, on the
+      -- continuation this time.
+      CL.conditionalLock_approveExtraObservers (toInterface @CL.ConditionalLock (Impl.ActiveLock nextState))
+        (approveArg "first" [] [e.bob]) === []
+    _ -> abort "expected a partial release with a continuation"

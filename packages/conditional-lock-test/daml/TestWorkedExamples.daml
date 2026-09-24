@@ -21,7 +21,8 @@ import ConditionalLock.TestToken qualified as Impl
 import Generated.HashVectors (vectors)
 import TestConditionalLock
   ( setup, account, termsFor, mint, factory, extra
-  , asLocked, asPending, enactArg, assertToken, assertConsumed, holdingsChanges )
+  , asLocked, asPending, enactArg, approveArg, assertToken, assertConsumed
+  , failsBecause, holdingsChanges )
 
 type LockHandle = (ContractId CL.ConditionalLock, ContractId V2.Holding)
 
@@ -281,6 +282,73 @@ test_example_dvpBetweenRegistries = do
   length (dedup (xIds <> yIds <> xRetryIds <> yRetryIds)) === 4
   assertBalance e.bob (account e.bob) x.instrumentId 200.0
   assertBalance e.alice (account e.alice) y.instrumentId 100.0
+
+-- | CIP section 4, item 2 variant: a venue enacts an approved DvP.
+-- Alice and Bob each approve "settle" on both locks, in separate transactions
+-- from their own wallets; the venue is the rule's only entitled enactor and
+-- holds no `Guard_Parties` authority of its own, so it enacts both rules
+-- together in one transaction only once Alice's and Bob's recorded
+-- approvals have met the two-party guard on each.
+--
+-- CIP-TBD Security Considerations, "Recorded approvals": once a rule's
+-- `Guard_Parties` threshold is met by recorded approvals, any single acting
+-- party can enact it. If the enactors were Alice and Bob themselves, Bob
+-- could enact X's settle alone -- after Alice approved it -- without ever
+-- settling Y, breaking the DvP's atomicity. Naming only the venue as
+-- enactor closes that gap for Alice and Bob, neither of whom can act alone;
+-- atomicity across the two locks then rests on the venue, which could enact
+-- one lock without the other.
+test_example_dvpVenueEnactsApprovedSettle : Script ()
+test_example_dvpVenueEnactsApprovedSettle = do
+  e <- setup ()
+  venue <- allocateParty "cl-venue"
+  let actors = [e.alice, e.bob]
+  let deadline = e.now `addRelTime` hours 2
+  let policyGuard = CL.Guard_Parties actors 2
+  let xLegs = [CL.Leg "settle" (account e.bob) 100.0 emptyMetadata]
+  let yLegs = [CL.Leg "settle" (account e.alice) 50.0 emptyMetadata]
+  let x = (termsFor e) with
+        rules = [CL.Rule "settle" [venue] [CL.Alternative [policyGuard, CL.Guard_Before deadline]]
+          (CL.Outcome_Release xLegs [])]
+  let y = x with
+        authorizer = account e.bob
+        instrumentId = V2.InstrumentId e.adminB "Y"
+        amount = 50.0
+        rules = [CL.Rule "settle" [venue] [CL.Alternative [policyGuard, CL.Guard_Before deadline]]
+          (CL.Outcome_Release yLegs [])]
+  (xCid, xBacking) <- lockAccepted e.rulesA "dvp-venue-x" x
+  (yCid, yBacking) <- lockAccepted e.rulesB "dvp-venue-y" y
+  xApprovedByAlice <- submit e.alice $ exerciseCmd xCid $ approveArg "settle" [] [e.alice]
+  (xCid2, _) <- asLocked xApprovedByAlice
+  xApprovedByBoth <- submit e.bob $ exerciseCmd xCid2 $ approveArg "settle" [] [e.bob]
+  (xCid3, _) <- asLocked xApprovedByBoth
+  Some xView <- queryInterfaceContractId e.alice xCid3
+  xView.approvals === [CL.Approval "settle" [] [e.alice, e.bob]]
+
+  -- Both approvals are already recorded on X alone, meeting its two-party
+  -- guard; Bob's own solo enactment still fails, with full authority and
+  -- full visibility of X, because he is not X's entitled enactor.
+  failsBecause (actAs [e.bob]) "an entitled enactor must act" $
+    exerciseCmd xCid3 $ enactArg "settle" [e.bob]
+
+  yApprovedByAlice <- submit e.alice $ exerciseCmd yCid $ approveArg "settle" [] [e.alice]
+  (yCid2, _) <- asLocked yApprovedByAlice
+  yApprovedByBoth <- submit e.bob $ exerciseCmd yCid2 $ approveArg "settle" [] [e.bob]
+  (yCid3, _) <- asLocked yApprovedByBoth
+  Some yView <- queryInterfaceContractId e.bob yCid3
+  yView.approvals === [CL.Approval "settle" [] [e.alice, e.bob]]
+  -- The venue is the sole entitled enactor of either rule but holds no
+  -- `Guard_Parties` authority of its own; only Alice's and Bob's recorded
+  -- approvals let its single-party enactment meet each rule's two-party guard.
+  tree <- submitTree (actAs [venue] <> readAs [e.alice, e.bob]) $
+    exerciseCmd xCid3 (enactArg "settle" [venue]) *>
+    exerciseCmd yCid3 (enactArg "settle" [venue])
+  length tree.rootEvents === 2
+  (_, xIds) <- checkEnactment e.alice "dvp-venue-x" x (xCid3, xBacking) (Some "settle") xLegs None tree.rootEvents
+  (_, yIds) <- checkEnactment e.bob "dvp-venue-y" y (yCid3, yBacking) (Some "settle") yLegs None tree.rootEvents
+  length (dedup (xIds <> yIds)) === 2
+  assertBalance e.bob (account e.bob) x.instrumentId 100.0
+  assertBalance e.alice (account e.alice) y.instrumentId 50.0
 
 -- | CIP section 4, item 3: Arbiter escrow.
 -- Buyer locks 100.0 with an award rule enacted by Arbiter, guarded by
@@ -547,12 +615,19 @@ test_example_conditionalPayment = do
   checkLive oracle "example-conditional-payment-paid" terms paidHandle
   Some active <- queryContractId oracle (coerceContractId paidCid : ContractId Impl.ActiveLock)
   active.state.accepted === [account payee]
-  submitMustFail payee $ exerciseCmd paidCid $ enactArg "pay" [payee]
+  -- Before the oracle attests, no alternative is satisfied for the payee alone.
+  failsBecause (actAs [payee]) "no alternative is satisfied" $ exerciseCmd paidCid $ enactArg "pay" [payee]
   submitMustFail oracle $ exerciseCmd paidCid $ enactArg "pay" [oracle]
   checkLive payer "example-conditional-payment-paid" terms paidHandle
-  let actors = [payee, oracle]
-  paidTree <- submitTree actors $ exerciseCmd paidCid $ enactArg "pay" actors
-  (_, paidIds) <- checkEnactment payer "example-conditional-payment-paid" terms paidHandle
+  -- The oracle attests from its own wallet, in a transaction separate from the
+  -- payee's later enactment.
+  approved <- submit oracle $ exerciseCmd paidCid $ approveArg "pay" [] [oracle]
+  (approvedCid, _) <- asLocked approved
+  Some approvedView <- queryInterfaceContractId payer approvedCid
+  approvedView.approvals === [CL.Approval "pay" [] [oracle]]
+  let approvedHandle = (approvedCid, snd paidHandle)
+  paidTree <- submitTree payee $ exerciseCmd approvedCid $ enactArg "pay" [payee]
+  (_, paidIds) <- checkEnactment payer "example-conditional-payment-paid" terms approvedHandle
     (Some "pay") [CL.Leg "payment" (account payee) 100.0 emptyMetadata] None paidTree.rootEvents
   length paidIds === 1
   assertBalance payee (account payee) terms.instrumentId 100.0
@@ -561,7 +636,7 @@ test_example_conditionalPayment = do
   let expiredTerms = termsAt expiredT0
   expiredHandle@(expiredCid, _) <- lockAccepted e.rulesA "example-conditional-payment-expired" expiredTerms
   setTime (expiredT0 `addRelTime` hours 2)
-  submitMustFail actors $ exerciseCmd expiredCid $ enactArg "pay" actors
+  submitMustFail [payee, oracle] $ exerciseCmd expiredCid $ enactArg "pay" [payee, oracle]
   checkLive payer "example-conditional-payment-expired" expiredTerms expiredHandle
   assertBalance payee (account payee) expiredTerms.instrumentId 100.0
   setTime expiredTerms.expiresAt
